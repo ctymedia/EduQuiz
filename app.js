@@ -389,9 +389,11 @@ async function markKey(id, patch){ if(!DEMO) await F.updateDoc(F.doc(db,'apiKeys
 const GEMINI_MODELS = ['gemini-3.8-flash','gemini-3.5-flash','gemini-2.5-flash','gemini-2.0-flash'];
 const isModelError = e => e?.status===404 || /model[^.]*?(not found|no longer available|not supported)|is not found for API version/i.test(e?.message||'');
 const isTransientError = e => e?.status===503 || e?.status===500 || /high demand|overloaded|UNAVAILABLE|temporarily|try again later/i.test(e?.message||'');
+const isNetworkError = e => e?.name==='TypeError' || /failed to fetch|networkerror|load failed|network request failed/i.test(e?.message||'');
+const NETWORK_MSG = 'Không kết nối được tới máy chủ Google AI (Failed to fetch). Đây là lỗi kết nối mạng hoặc trình duyệt chặn, KHÔNG phải lỗi API key. Cách xử lý: 1) Kiểm tra lại kết nối mạng. 2) Nếu đang dùng trình duyệt Brave: bấm biểu tượng con sư tử ở thanh địa chỉ và hạ Shields xuống (Shields Down) cho trang này; tắt app chặn quảng cáo/VPN nếu có. 3) Hoặc mở trang bằng Chrome rồi thử lại.';
 const sleepMs = ms => new Promise(r=>setTimeout(r,ms));
 async function callGemini(parts, key){
-  let lastErr = null, sawTransient = false;
+  let lastErr = null, sawTransient = false, sawNetwork = false;
   for (let round=0; round<2; round++){
     for (const model of GEMINI_MODELS){
       try{
@@ -401,10 +403,11 @@ async function callGemini(parts, key){
         const j = await r.json().catch(()=>({}));
         if (!r.ok){ const err=new Error(j?.error?.message||('HTTP '+r.status)); err.status=r.status; throw err; }
         return j?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'';
-      }catch(e){ lastErr=e; if (isModelError(e)) continue; if (isTransientError(e)){ sawTransient=true; continue; } throw e; }
+      }catch(e){ lastErr=e; if (isModelError(e)) continue; if (isNetworkError(e)){ sawNetwork=true; continue; } if (isTransientError(e)){ sawTransient=true; continue; } throw e; }
     }
-    if (round===0 && sawTransient) await sleepMs(3000); // Google qua tai: nghi 3 giay roi thu lai tu dau
+    if (round===0 && (sawTransient || sawNetwork)) await sleepMs(3000); // Qua tai hoac mang chop: nghi 3 giay roi thu lai tu dau
   }
+  if (sawNetwork){ const err=new Error(NETWORK_MSG); err.network=true; throw err; }
   if (sawTransient){ const err=new Error('Máy chủ AI của Google đang quá tải do nhu cầu cao (lỗi tạm thời phía Google, không phải lỗi API key). Thầy/cô chờ khoảng 1 phút rồi bấm tạo lại nhé.'); err.transient=true; throw err; }
   const err = new Error('Không có model Gemini nào khả dụng lúc này. Lỗi cuối: '+(lastErr?.message||'')); err.modelError = true; err.status = lastErr?.status; throw err;
 }
@@ -418,6 +421,7 @@ async function generateWithRotation(parts, ownKey){
   for (const c of candidates){
     try{ const text = await callGemini(parts, c.key); if (c.id) await markKey(c.id, { status:'ready', lastUsedAt: Date.now(), lastError:'' }); return text; }
     catch(e){ lastErr = e;
+      if (e.network || isNetworkError(e)){ const ne = new Error(NETWORK_MSG); ne.network = true; throw ne; }
       if (e.transient || isTransientError(e)){ const te = new Error('Máy chủ AI của Google đang quá tải do nhu cầu cao (lỗi tạm thời phía Google, không phải lỗi API key). Thầy/cô chờ khoảng 1 phút rồi bấm tạo lại nhé.'); te.transient = true; throw te; }
       if (e.modelError || isModelError(e)) throw e; // Loi model la loi cua he thong, khong phai loi cua key -> khong danh dau key, khong thu key khac
       const quota = e.status===429 || /quota|rate|RESOURCE_EXHAUSTED/i.test(e.message||'');
