@@ -1,9 +1,10 @@
 rules_version = '2';
-// EduQuiz — Luật truy cập Firestore cho lớp học
-// BẢN DÙNG TRONG LỚP: cho phép đọc/ghi không cần đăng nhập để học sinh
-// vào bằng PIN cho nhanh (giống kahoot.it). Ai biết project cũng có thể
-// ghi dữ liệu, nên KHÔNG lưu thông tin nhạy cảm trong Firestore này.
-// Khi cần chặt hơn: bật Firebase Authentication và sửa allow theo uid giáo viên.
+// EduQuiz — Luật truy cập Firestore cho lớp học (bản có tài khoản thành viên)
+// Cho phép đọc/ghi không cần đăng nhập ở tầng Firestore để học sinh vào
+// bằng PIN cho nhanh và để trang tĩnh kiểm tra hồ sơ thành viên.
+// Việc chặn tài khoản chưa duyệt / đã chặn / hết hạn được thực thi trong
+// app.js (kiểm tra users/{uid}.status và expiresAt ngay khi đăng nhập).
+// KHÔNG lưu thông tin nhạy cảm trong Firestore này.
 service cloud.firestore {
   match /databases/{database}/documents {
     match /quizzes/{id} {
@@ -12,6 +13,12 @@ service cloud.firestore {
     match /sessions/{pin} {
       allow read, write: if true;
       match /players/{playerId} {
+        allow read, write: if true;
+      }
+    }
+    match /users/{uid} {
+      allow read, write: if true;
+      match /devices/{deviceId} {
         allow read, write: if true;
       }
     }

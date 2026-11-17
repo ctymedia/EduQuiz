@@ -9,12 +9,14 @@
 <body>
 <header>
   <div class="logo">🎓 EduQuiz</div>
-  <nav>
+  <nav id="mainNav">
     <button data-nav="home">Trang chủ</button>
     <button data-nav="library">Thư viện của tôi</button>
     <button data-nav="create">+ Tạo bộ câu hỏi</button>
     <button data-nav="reports">Báo cáo</button>
+    <button data-nav="admin" id="adminBtn" style="display:none">👑 Quản lý thành viên</button>
   </nav>
+  <div id="authArea" class="autharea"></div>
   <div id="syncStatus" class="sync">Đang kết nối…</div>
 </header>
 <main id="app"></main>
