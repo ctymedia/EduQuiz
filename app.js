@@ -374,16 +374,26 @@ async function addKeyToPool(key, addedBy){
 async function poolKeys(){
   if (DEMO) return [];
   const s = await F.getDocs(F.collection(db,'apiKeys'));
-  return s.docs.map(d=>({id:d.id,...d.data()})).filter(k=>k.status==='ready').sort((a,b)=>(a.lastUsedAt||0)-(b.lastUsedAt||0));
+  const order = {ready:0, quota:1, error:2};
+  // Lay ca key dang loi/het han muc de thu lai (tu phuc hoi khi chay duoc), key san sang dung truoc
+  return s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>((order[a.status]??0)-(order[b.status]??0)) || ((a.lastUsedAt||0)-(b.lastUsedAt||0)));
 }
 async function markKey(id, patch){ if(!DEMO) await F.updateDoc(F.doc(db,'apiKeys',id), patch); }
+const GEMINI_MODELS = ['gemini-3.8-flash','gemini-3.5-flash','gemini-2.5-flash','gemini-2.0-flash'];
+const isModelError = e => e?.status===404 || /model[^.]*?(not found|no longer available|not supported)|is not found for API version/i.test(e?.message||'');
 async function callGemini(parts, key){
-  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+encodeURIComponent(key), {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ contents:[{parts}], generationConfig:{ responseMimeType:'application/json', temperature:0.7 } }) });
-  const j = await r.json().catch(()=>({}));
-  if (!r.ok){ const err=new Error(j?.error?.message||('HTTP '+r.status)); err.status=r.status; throw err; }
-  return j?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'';
+  let lastErr = null;
+  for (const model of GEMINI_MODELS){
+    try{
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent?key='+encodeURIComponent(key), {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ contents:[{parts}], generationConfig:{ responseMimeType:'application/json', temperature:0.7 } }) });
+      const j = await r.json().catch(()=>({}));
+      if (!r.ok){ const err=new Error(j?.error?.message||('HTTP '+r.status)); err.status=r.status; throw err; }
+      return j?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'';
+    }catch(e){ lastErr=e; if (isModelError(e)) continue; throw e; }
+  }
+  const err = new Error('Không có model Gemini nào khả dụng lúc này. Lỗi cuối: '+(lastErr?.message||'')); err.modelError = true; err.status = lastErr?.status; throw err;
 }
 // Thử lần lượt: key người dùng vừa nhập (nếu có) -> các key sẵn sàng trong kho (nếu được quyền dùng key hệ thống), xoay vòng khi hết hạn mức/lỗi
 async function generateWithRotation(parts, ownKey){
@@ -394,7 +404,9 @@ async function generateWithRotation(parts, ownKey){
   let lastErr = null;
   for (const c of candidates){
     try{ const text = await callGemini(parts, c.key); if (c.id) await markKey(c.id, { status:'ready', lastUsedAt: Date.now(), lastError:'' }); return text; }
-    catch(e){ lastErr = e; const quota = e.status===429 || /quota|rate|RESOURCE_EXHAUSTED/i.test(e.message||'');
+    catch(e){ lastErr = e;
+      if (e.modelError || isModelError(e)) throw e; // Loi model la loi cua he thong, khong phai loi cua key -> khong danh dau key, khong thu key khac
+      const quota = e.status===429 || /quota|rate|RESOURCE_EXHAUSTED/i.test(e.message||'');
       if (c.id) await markKey(c.id, { status: quota?'quota':'error', lastError: String(e.message||e).slice(0,200), lastUsedAt: Date.now() });
       continue; }
   }
