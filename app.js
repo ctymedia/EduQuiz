@@ -210,7 +210,7 @@ const store = {
     const s=await F.getDoc(F.doc(db,'sessions',pin)); return s.exists()?s.data():null; },
   async setSession(pin,patch){ if(DEMO){ const cur=await this.getSession(pin); localStorage.setItem('eq_session_'+pin,JSON.stringify({...cur,...patch})); window.dispatchEvent(new Event('eq-change')); }
     else await F.updateDoc(F.doc(db,'sessions',pin),patch); },
-  async join(pin,nickname){ const id='p'+Date.now()+Math.floor(Math.random()*999); const p={nickname,score:0,streak:0,answers:{},cheatCount:0,cheats:{},joinedAt:Date.now()};
+  async join(pin,nickname,avatar){ const id='p'+Date.now()+Math.floor(Math.random()*999); const p={nickname,avatar:avatar||'🙂',score:0,streak:0,answers:{},cheatCount:0,cheats:{},joinedAt:Date.now()};
     if(DEMO){ const arr=JSON.parse(localStorage.getItem('eq_players_'+pin)||'[]'); arr.push({id,...p}); localStorage.setItem('eq_players_'+pin,JSON.stringify(arr)); window.dispatchEvent(new Event('eq-change')); }
     else await F.setDoc(F.doc(db,'sessions',pin,'players',id),p); return id; },
   async listPlayers(pin){ if(DEMO) return JSON.parse(localStorage.getItem('eq_players_'+pin)||'[]');
@@ -242,23 +242,37 @@ async function checkQuizLimits(newQuestionsCount, excludeId){
 }
 
 // ---------- Trang chủ ----------
+
+const AVATARS = ['🦊','🐼','🦄','🐶','🐱','🦁','🐸','🐵','🦉','🐙','🦖','🐳','🍕','🚀','⭐','🎧','🌈','⚽'];
+const shuffleArr = a => { const x=[...a]; for(let i=x.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [x[i],x[j]]=[x[j],x[i]]; } return x; };
+function avatarPickerHtml(id){ return `<div class="row" id="${id}" style="justify-content:center;gap:6px">${AVATARS.map((a,i)=>`<button type="button" class="btn ${i===0?'':'light'}" data-av="${a}" style="font-size:26px;padding:6px 10px">${a}</button>`).join('')}</div>`; }
+function wireAvatarPicker(id){ let sel = AVATARS[0]; const box = document.getElementById(id); if(!box) return ()=>sel;
+  box.querySelectorAll('[data-av]').forEach(b=>b.onclick=()=>{ sel=b.dataset.av; box.querySelectorAll('[data-av]').forEach(x=>x.classList.add('light')); b.classList.remove('light'); });
+  return ()=>sel; }
+// Man hinh nhap biet danh + chon avatar cho phong choi truc tiep (PIN)
+function renderJoinSetup(pin){
+  app.innerHTML = `<div class="card join"><h1>🎮 Sắp vào phòng rồi!</h1><p class="small">Mã phòng: <b>${pin}</b> • Em nhập biệt danh và chọn một avatar ngộ nghĩnh nhé</p>
+  <input id="jnick" placeholder="Biệt danh của em" maxlength="30">
+  <p class="small" style="text-align:left;margin:10px 0 4px"><b>Chọn avatar:</b></p>${avatarPickerHtml('avPick')}
+  <button class="btn green" style="width:100%;margin-top:14px" id="readyBtn">✔ Sẵn sàng</button></div>`;
+  const getAv = wireAvatarPicker('avPick');
+  $('#readyBtn').onclick = async()=>{ const nick = $('#jnick').value.trim(); if(!nick) return alert('Em nhập biệt danh trước nhé!');
+    renderPlayer(pin, await store.join(pin, nick, getAv())); };
+}
 function renderHome(){
   app.innerHTML=`${DEMO?'<div class="notice"><b>Đang ở chế độ demo.</b></div>':''}
-  <div class="card join"><h1>Tham gia trò chơi</h1><p class="small">Học sinh nhập mã PIN do giáo viên cung cấp — không cần tài khoản</p>
-  <input id="pin" inputmode="numeric" maxlength="6" placeholder="Mã PIN 6 số" style="text-align:center;font-size:22px;font-weight:800">
-  <input id="nick" placeholder="Tên của em (biệt danh)"><button class="btn green" style="width:100%" id="joinBtn">Vào chơi →</button></div>
-  <div class="card join"><h1>🏆 Vào phòng thi</h1><p class="small">Học sinh nhập mã phòng thi do giáo viên cấp — chỉ vào được trong khung giờ thi</p>
-  <input id="ccode" inputmode="numeric" maxlength="6" placeholder="Mã phòng thi 6 số" style="text-align:center;font-size:22px;font-weight:800">
-  <input id="cnick" placeholder="Họ tên của em"><button class="btn" style="width:100%" id="cjoinBtn">Vào phòng thi →</button></div>
+  <div class="card join"><h1>🎓 EduQuiz</h1><p class="small">Nhập mã phòng do giáo viên cung cấp — mã PIN trò chơi hay mã phòng thi đều dùng chung ô này, không cần tài khoản</p>
+  <input id="roomCode" inputmode="numeric" maxlength="6" placeholder="Mã phòng 6 số" style="text-align:center;font-size:24px;font-weight:800;letter-spacing:4px">
+  <button class="btn green" style="width:100%;margin-top:10px" id="enterBtn">Vào phòng →</button></div>
   <div class="card center"><h2>Thầy/cô tổ chức trò chơi?</h2><p class="small">${me?`Đang đăng nhập: <b>${esc(me.displayName||me.email)}</b> • Gói <b>${esc(myPlan().name)}</b> • Hạn dùng: ${fmtDate(me.expiresAt)}`:'Đăng nhập để tạo thư viện và kho câu hỏi riêng. Chưa có tài khoản thì Đăng ký — admin phê duyệt xong mới đăng nhập được và tự động dùng gói Free.'}</p>
   <button class="btn" onclick="document.querySelector('[data-nav=library]').click()">Mở thư viện của tôi →</button></div>`;
-  $('#joinBtn').onclick=async()=>{ const pin=$('#pin').value.trim(), nick=$('#nick').value.trim();
-    if(pin.length!==6||!nick) return alert('Em nhập đủ mã PIN 6 số và tên nhé!');
-    const s=await store.getSession(pin); if(!s) return alert('Không tìm thấy phòng chơi này. Em kiểm tra lại mã PIN nhé!');
-    renderPlayer(pin, await store.join(pin,nick)); };
-  $('#cjoinBtn').onclick=async()=>{ const code=$('#ccode').value.trim(), nick=$('#cnick').value.trim();
-    if(code.length!==6||!nick) return alert('Em nhập đủ mã phòng thi 6 số và họ tên nhé!');
-    renderContestGate(code, nick); };
+  const go = async()=>{ const code = $('#roomCode').value.trim();
+    if (code.length!==6) return alert('Em nhập mã phòng đủ 6 số nhé!');
+    const s = await store.getSession(code); if (s) return renderJoinSetup(code);
+    const ct = await contestGet(code); if (ct) return renderContestGate(code);
+    alert('Không tìm thấy phòng nào với mã này. Em kiểm tra lại mã giúp thầy/cô nhé!'); };
+  $('#enterBtn').onclick = go;
+  $('#roomCode').addEventListener('keydown', e=>{ if (e.key==='Enter') go(); });
 }
 
 // ---------- Thư viện: hiện cả danh sách câu hỏi, có nút Sửa ----------
@@ -632,7 +646,7 @@ function renderHost(pin){
   <div class="row" style="justify-content:center;margin-top:14px"><button class="btn green" id="startBtn">▶ Bắt đầu trò chơi</button></div><div id="stage"></div></div>`;
   store.onSession(pin,s=>{ if(session&&s&&s.status!==session.status) localBoard=false; session=s; if(s) showStage(); });
   store.onPlayers(pin,ps=>{ players=ps.sort((a,b)=>(b.score||0)-(a.score||0)); const pc=$('#pcount'); if(!pc) return; pc.textContent=session?.status==='lobby'?`${ps.length} học sinh đã vào`:'Bảng điểm trực tiếp';
-    $('#plist').innerHTML=ps.map(p=>`<span class="player">${esc(p.nickname)} • ${p.score||0}đ</span>`).join(''); if(session) showStage(); });
+    $('#plist').innerHTML=ps.map(p=>`<span class="player">${p.avatar||'🙂'} ${esc(p.nickname)} • ${p.score||0}đ</span>`).join(''); if(session) showStage(); });
   $('#startBtn').onclick=async()=>{ await store.setSession(pin,{status:'playing',currentQuestion:0,questionStartedAt:Date.now(),antiCheat: $('#antiCheat')?.checked!==false}); };
   function showStage(){ const s=session; if(!s||s.status==='lobby') return; const sb=$('#startBtn'); if(sb) sb.style.display='none'; const st=$('#stage'); if(!st) return; const q=s.questions[s.currentQuestion];
     if(s.status==='finished'){ st.innerHTML=podium(players)+`<button class="btn" onclick="location.reload()">Về trang chủ</button>`; enableSorting(st); return; }
@@ -679,6 +693,7 @@ async function renderPractice(quiz){ let i=0, score=0, qStart=Date.now(); const 
 // ---------- Cuộc thi (phòng thi có khung giờ, mật mã, giới hạn số lần làm) ----------
 
 const dtLocal = ms => { const d=new Date(ms - new Date().getTimezoneOffset()*60000); return d.toISOString().slice(0,16); };
+const fmtDuration = ms => { if (ms==null || isNaN(ms)) return '—'; const sec=Math.max(0,Math.round(ms/1000)); return Math.floor(sec/60)+' phút '+(sec%60)+' giây'; };
 async function contestCreate(data){
   const code = String(Math.floor(100000+Math.random()*900000));
   if (DEMO){ localStorage.setItem('eq_contest_'+code, JSON.stringify({code,...data})); return code; }
@@ -724,10 +739,12 @@ async function renderContests(){
   <div class="row"><label class="small grow">Mật mã phòng thi (không bắt buộc) <input id="ctPass" placeholder="Để trống nếu không đặt mật mã"></label>
   <label class="small">Số lần làm lại tối đa <input id="ctAttempts" type="number" value="1" min="1" max="10" style="width:90px"></label></div>
   <label class="small" style="display:block"><input type="checkbox" id="ctAnti" checked style="width:auto"> ⚠️ Bật chống gian lận (rời màn hình khi đang làm: điểm câu đó còn 50%, ghi số lần vào thống kê)</label>
+  <label class="small"><b>Số câu hỏi mỗi lần thi</b> — để <b>0</b> là lấy tất cả câu trong bộ đề; nếu đặt số, mỗi lần làm bài hệ thống tự chọn ngẫu nhiên đủ số câu đó và xáo trộn thứ tự câu lẫn phương án <input id="ctNumQ" type="number" value="0" min="0" max="100" style="width:90px"></label>
+  <label class="small" style="display:block"><input type="checkbox" id="ctShowBoard" style="width:auto"> 🏆 Cho học sinh xem bảng xếp hạng đầy đủ sau khi nộp bài (thứ hạng, tên, thời gian làm bài, điểm)</label>
   <button class="btn green" id="ctCreate">🏆 Tạo cuộc thi</button> <span id="ctMsg" class="small"></span>
   <p class="small">Học sinh vào bằng <b>mã phòng thi 6 số</b> ở thẻ “Vào phòng thi” tại Trang chủ. Ngoài khung giờ trên, học sinh không vào được phòng thi.</p></div>
   <div class="card"><h2>Cuộc thi của tôi (${mine.length})</h2>
-  ${mine.length? mine.map(c=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(c.title)}</b> ${statusOf(c)}<br><span class="small">Mã phòng thi: <b style="font-size:18px">${esc(c.code)}</b> • ${esc(c.className||'Không chọn lớp')} • ${c.questions?.length||0} câu • Tối đa ${c.maxAttempts||1} lần làm<br>Từ ${fmtDT(c.startAt)} đến ${fmtDT(c.endAt)}${c.password?' • Có mật mã':''}</span></div>
+  ${mine.length? mine.map(c=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(c.title)}</b> ${statusOf(c)}<br><span class="small">Mã phòng thi: <b style="font-size:18px">${esc(c.code)}</b> • ${esc(c.className||'Không chọn lớp')} • ${c.questions?.length||0} câu • Tối đa ${c.maxAttempts||1} lần làm${c.numQuestions>0?` • Mỗi lần thi ${c.numQuestions} câu ngẫu nhiên`:''}${c.showLeaderboard?' • HS xem được BXH':''}<br>Từ ${fmtDT(c.startAt)} đến ${fmtDT(c.endAt)}${c.password?' • Có mật mã':''}</span></div>
   <button class="btn" data-stats="${c.code}">📊 Thống kê</button><button class="btn red" data-delct="${c.code}">Xóa</button></div></div>`).join('') : '<p class="small">Chưa có cuộc thi nào.</p>'}</div>`;
   $('#ctCreate').onclick = async()=>{
     const quiz = quizzes.find(q=>q.id===$('#ctQuiz').value); if(!quiz) return alert('Thầy/cô chưa có bộ đề nào. Tạo bộ đề trước nhé!');
@@ -736,7 +753,7 @@ async function renderContests(){
     const cls = classes.find(c=>c.id===$('#ctClass').value);
     const code = await contestCreate({ quizId: quiz.id, title: quiz.title, subject: quiz.subject||'', questions: quiz.questions,
       classId: cls?.id||'', className: cls?.name||'', startAt, endAt, password: $('#ctPass').value.trim(),
-      maxAttempts: Math.max(1,Math.min(10,+$('#ctAttempts').value||1)), antiCheat: $('#ctAnti').checked,
+      maxAttempts: Math.max(1,Math.min(10,+$('#ctAttempts').value||1)), antiCheat: $('#ctAnti').checked, numQuestions: Math.max(0,+$('#ctNumQ').value||0), showLeaderboard: $('#ctShowBoard').checked,
       ownerUid: me?.uid||'', ownerEmail: me?.email||'', createdAt: Date.now() });
     alert('Đã tạo cuộc thi! Mã phòng thi: '+code+'\nThầy/cô gửi mã này cho học sinh để vào thi trong khung giờ đã đặt.');
     renderContests();
@@ -751,14 +768,16 @@ async function renderContestGate(code, nickname){
   if (!ct){ alert('Không tìm thấy phòng thi này. Em kiểm tra lại mã phòng thi nhé!'); return; }
   const now = Date.now(), open = now>=ct.startAt && now<=ct.endAt;
   app.innerHTML = `<div class="card join"><h1>🏆 ${esc(ct.title)}</h1>
-  <p class="small">${ct.className?`Lớp: <b>${esc(ct.className)}</b> • `:''}${ct.questions.length} câu hỏi • Mỗi em được làm tối đa <b>${ct.maxAttempts||1} lần</b><br>Khung giờ thi: từ <b>${fmtDT(ct.startAt)}</b> đến <b>${fmtDT(ct.endAt)}</b></p>
+  <p class="small">${ct.className?`Lớp: <b>${esc(ct.className)}</b> • `:''}${ct.numQuestions>0?`Thi ${ct.numQuestions} câu (chọn ngẫu nhiên từ ${ct.questions.length} câu của bộ đề)`:ct.questions.length+' câu hỏi'} • Mỗi em được làm tối đa <b>${ct.maxAttempts||1} lần</b><br>Khung giờ thi: từ <b>${fmtDT(ct.startAt)}</b> đến <b>${fmtDT(ct.endAt)}</b></p>
   ${open? `<input id="gNick" placeholder="Họ tên của em" value="${esc(nickname||'')}">
+  <p class="small" style="text-align:left;margin:10px 0 4px"><b>Chọn avatar:</b></p>${avatarPickerHtml('gAvPick')}
   ${ct.password?'<input id="gPass" type="password" placeholder="Mật mã phòng thi">':''}
-  <button class="btn green" style="width:100%" id="gStart">Bắt đầu làm bài →</button>
+  <button class="btn green" style="width:100%" id="gStart">✔ Sẵn sàng — Bắt đầu làm bài</button>
   <p class="small">Trả lời xong mỗi câu, hệ thống tự chuyển sang câu tiếp theo. ${ct.antiCheat?'Lưu ý: rời khỏi màn hình khi đang làm bài sẽ bị trừ 50% điểm câu đó và ghi vào thống kê.':''}</p>`
   : `<div class="notice">${now<ct.startAt?'⏰ Chưa đến giờ thi. Em quay lại trong khung giờ ở trên nhé!':'⛔ Đã hết thời gian thi, phòng thi đã đóng.'}</div>
   <button class="btn" style="width:100%" onclick="location.reload()">← Về trang chủ</button>`}</div>`;
   if (!open) return;
+  const getGAv = wireAvatarPicker('gAvPick');
   $('#gStart').onclick = async()=>{
     const nick = $('#gNick').value.trim(); if(!nick) return alert('Em nhập họ tên trước nhé!');
     if (ct.password && $('#gPass').value.trim() !== ct.password) return alert('Mật mã phòng thi chưa đúng. Em hỏi lại thầy/cô nhé!');
@@ -768,14 +787,18 @@ async function renderContestGate(code, nickname){
     const used = Math.max(done, localDone);
     if (used >= (ct.maxAttempts||1)) return alert('Em đã hết số lần làm bài cho phép ('+(ct.maxAttempts||1)+' lần). Em liên hệ thầy/cô nếu cần làm lại nhé!');
     localStorage.setItem('eq_ctatt_'+ct.code+'_'+nameKey, used+1);
-    renderContestPlay(ct, nick, used);
+    renderContestPlay(ct, nick, used, getGAv());
   };
 }
 
 // Học sinh làm bài thi: tự chuyển câu, tính điểm theo tốc độ, chống gian lận
-function renderContestPlay(ct, nickname, attemptsBefore){
+function renderContestPlay(ct, nickname, attemptsBefore, avatar){
   stopListen();
-  const qs = ct.questions, nameKey = nickname.trim().toLowerCase(), startedAt = Date.now();
+  const pool = shuffleArr(ct.questions).slice(0, ct.numQuestions>0 ? Math.min(ct.numQuestions, ct.questions.length) : ct.questions.length);
+  const qs = pool.map(q=>{ if (q.type==='tf' || !Array.isArray(q.answers) || q.answers.length<2) return q;
+    const idxs = shuffleArr(q.answers.map((_,j)=>j));
+    return {...q, answers: idxs.map(j=>q.answers[j]), correct: idxs.indexOf(q.correct)}; });
+  const nameKey = nickname.trim().toLowerCase(), startedAt = Date.now();
   let i=0, score=0, correctCount=0, cheatCount=0, finished=false, locked=false, cheated=false, qStart=0, timerInt=null;
   const answers = [];
   const onVis = ()=>{ if (document.hidden) markCheat(); };
@@ -789,7 +812,7 @@ function renderContestPlay(ct, nickname, attemptsBefore){
   }
   async function finish(){
     if (finished) return; finished = true; cleanup();
-    const res = { name: nickname, nameKey, className: ct.className||'', score, correctCount, total: qs.length, cheatCount, attempt: (attemptsBefore||0)+1, startedAt, finishedAt: Date.now(), answers };
+    const res = { name: nickname, avatar: avatar||'🙂', nameKey, className: ct.className||'', score, correctCount, total: qs.length, cheatCount, attempt: (attemptsBefore||0)+1, startedAt, finishedAt: Date.now(), durationMs: Date.now()-startedAt, answers };
     await contestSubmitResult(ct.code, res);
     const all = await contestResults(ct.code);
     const ranked = [...all].sort((a,b)=>(b.score-a.score)||(a.finishedAt-b.finishedAt));
@@ -797,8 +820,10 @@ function renderContestPlay(ct, nickname, attemptsBefore){
     app.innerHTML = `<div class="card center"><h1>🏁 Đã nộp bài!</h1>
     <p class="big">Điểm của em: ${score}</p>
     <p>Số câu đúng: <b>${correctCount}/${qs.length}</b> • Xếp hạng hiện tại: <b>${rank>0?('thứ '+rank+' / '+ranked.length):'—'}</b>${ct.antiCheat?`<br>Số lần rời màn hình: <b>${cheatCount}</b>`:''}</p>
+    ${ct.showLeaderboard? `<h3 style="margin-top:18px">🏆 Bảng xếp hạng</h3><table class="sortable"><tr><th>Hạng</th><th>Học sinh</th><th>Thời gian làm bài</th><th>Điểm</th></tr>${ranked.map((r,ix)=>{ const dur = (r.durationMs!=null)? r.durationMs : ((r.finishedAt||0)-(r.startedAt||0)); return `<tr ${r.nameKey===nameKey&&r.finishedAt===res.finishedAt?'style="background:#fff3cd;font-weight:800"':''}><td data-sort="${ix+1}">${ix+1}</td><td>${r.avatar||'🙂'} ${esc(r.name)}</td><td data-sort="${dur}">${fmtDuration(dur)}</td><td data-sort="${r.score||0}"><b>${r.score||0}</b></td></tr>`; }).join('')}</table>` : ''}
     <div class="row" style="justify-content:center">${(attemptsBefore||0)+1 < (ct.maxAttempts||1) ? '<button class="btn" id="ctRetry">↻ Làm lại bài thi</button>' : ''}<button class="btn green" onclick="location.reload()">Về trang chủ</button></div></div>`;
-    const rt = $('#ctRetry'); if (rt) rt.onclick = ()=>{ localStorage.setItem('eq_ctatt_'+ct.code+'_'+nameKey, (attemptsBefore||0)+2 > (ct.maxAttempts||1) ? (ct.maxAttempts||1) : (attemptsBefore||0)+2); renderContestPlay(ct, nickname, (attemptsBefore||0)+1); };
+    enableSorting(app);
+    const rt = $('#ctRetry'); if (rt) rt.onclick = ()=>{ localStorage.setItem('eq_ctatt_'+ct.code+'_'+nameKey, (attemptsBefore||0)+2 > (ct.maxAttempts||1) ? (ct.maxAttempts||1) : (attemptsBefore||0)+2); renderContestPlay(ct, nickname, (attemptsBefore||0)+1, avatar); };
   }
   function answer(choice){
     if (locked || finished) return; locked = true; clearInterval(timerInt);
@@ -844,7 +869,7 @@ async function renderContestStats(code){
   app.innerHTML = `<div class="card"><h1>📊 Thống kê cuộc thi</h1>
   <p><b>${esc(ct.title)}</b> • Mã phòng thi <b>${esc(ct.code)}</b>${ct.className?` • Lớp ${esc(ct.className)}`:''}<br><span class="small">Khung giờ: ${fmtDT(ct.startAt)} → ${fmtDT(ct.endAt)} • Đã có ${rs.length} lượt làm bài • Bảng tự xếp hạng theo điểm từ cao xuống thấp, bấm ↕ ở từng cột để sắp xếp lại.</span></p>
   <table class="sortable"><tr><th>Hạng</th><th>Học sinh</th><th>Ngày giờ làm</th><th>Điểm</th><th>Số câu đúng</th><th>⚠️ Số lần gian lận</th><th>Lần làm thứ</th></tr>
-  ${ranked.map(r=>`<tr><td data-sort="${rankOf(r)}">${rankOf(r)}</td><td>${esc(r.name)}</td><td data-sort="${r.finishedAt||0}">${fmtDT(r.finishedAt)}</td><td data-sort="${r.score||0}"><b>${r.score||0}</b></td><td data-sort="${r.correctCount||0}">${r.correctCount||0}/${r.total||0}</td><td data-sort="${r.cheatCount||0}">${r.cheatCount||0}</td><td data-sort="${r.attempt||1}">${r.attempt||1}</td></tr>`).join('')||'<tr><td colspan="7">Chưa có học sinh nào làm bài.</td></tr>'}
+  ${ranked.map(r=>`<tr><td data-sort="${rankOf(r)}">${rankOf(r)}</td><td>${r.avatar||'🙂'} ${esc(r.name)}</td><td data-sort="${r.finishedAt||0}">${fmtDT(r.finishedAt)}</td><td data-sort="${r.score||0}"><b>${r.score||0}</b></td><td data-sort="${r.correctCount||0}">${r.correctCount||0}/${r.total||0}</td><td data-sort="${r.cheatCount||0}">${r.cheatCount||0}</td><td data-sort="${r.attempt||1}">${r.attempt||1}</td></tr>`).join('')||'<tr><td colspan="7">Chưa có học sinh nào làm bài.</td></tr>'}
   </table>
   <button class="btn" onclick="document.querySelector('[data-nav=contests]').click()">← Quay lại danh sách cuộc thi</button></div>`;
   enableSorting(app);
@@ -864,7 +889,7 @@ async function renderReports(){
   ${qs.map(q=>`<tr><td>${esc(q.title)}</td><td>${esc(q.subject||'')}</td><td data-sort="${q.questions.length}">${q.questions.length}</td><td>${esc(q.ownerEmail||'')}</td></tr>`).join('')}</table></div>`;
   enableSorting(app);
 }
-const leaderboard=(ps,m)=>`<h2>🏆 Bảng xếp hạng</h2><table class="sortable"><tr><th>Hạng</th><th>Người chơi</th><th>Điểm</th></tr>${ps.slice(0,10).map((p,i)=>`<tr ${m&&p.id===m?'style="background:#fff3cd;font-weight:800"':''}><td data-sort="${i+1}">${i+1}</td><td>${esc(p.nickname)} ${p.streak>=3?'🔥':''}</td><td data-sort="${p.score||0}">${p.score||0} điểm</td></tr>`).join('')}</table>`;
-const podium=ps=>{ const t=[ps[1],ps[0],ps[2]].filter(Boolean); return `<h2>👑 Bục vinh quang</h2><div class="podium">${t.map(p=>`<div class="pod"><div>${esc(p.nickname)}</div><div class="bar">${p.score||0}đ</div></div>`).join('')}</div>`+leaderboard(ps); };
+const leaderboard=(ps,m)=>`<h2>🏆 Bảng xếp hạng</h2><table class="sortable"><tr><th>Hạng</th><th>Người chơi</th><th>Điểm</th></tr>${ps.slice(0,10).map((p,i)=>`<tr ${m&&p.id===m?'style="background:#fff3cd;font-weight:800"':''}><td data-sort="${i+1}">${i+1}</td><td>${p.avatar||'🙂'} ${esc(p.nickname)} ${p.streak>=3?'🔥':''}</td><td data-sort="${p.score||0}">${p.score||0} điểm</td></tr>`).join('')}</table>`;
+const podium=ps=>{ const t=[ps[1],ps[0],ps[2]].filter(Boolean); return `<h2>👑 Bục vinh quang</h2><div class="podium">${t.map(p=>`<div class="pod"><div style="font-size:28px">${p.avatar||'🙂'}</div><div>${esc(p.nickname)}</div><div class="bar">${p.score||0}đ</div></div>`).join('')}</div>`+leaderboard(ps); };
 
 init();
