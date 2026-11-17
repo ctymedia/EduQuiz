@@ -1,24 +1,15 @@
 // ============================================================
-//  CẤU HÌNH FIREBASE CỦA THẦY — DÁN THÔNG TIN CỦA THẦY VÀO ĐÂY
-// ============================================================
-// Cách lấy:
-//  1. Vào https://console.firebase.google.com -> Tạo project "eduquiz"
-//  2. Trong project: Build -> Firestore Database -> Create database
-//     -> Start in test mode -> Enable
-//  3. Project settings (bánh răng) -> General -> Your apps -> </> Web
-//     -> Đăng ký app tên "EduQuiz Web" -> Firebase sẽ hiện đoạn config
-//  4. Copy 6 dòng apiKey...appId đó dán đè vào dưới đây
-// Lưu ý: Đoạn config này KHÔNG phải mật khẩu bí mật. Nó là địa chỉ
-// công khai của project, mọi trang web dùng Firebase đều để lộ nó.
-// Bảo mật thật nằm ở file firestore.rules
+//  CẤU HÌNH FIREBASE — Dự án eduquiz-71b98 của thầy
+//  Đoạn config này là địa chỉ công khai của project (không phải
+//  mật khẩu). Bảo mật nằm ở firestore.rules
 // ============================================================
 export const firebaseConfig = {
-  apiKey: "DAN_VAO_DAY",
-  authDomain: "DAN_VAO_DAY",
-  projectId: "DAN_VAO_DAY",
-  storageBucket: "DAN_VAO_DAY",
-  messagingSenderId: "DAN_VAO_DAY",
-  appId: "DAN_VAO_DAY"
+  apiKey: "AIzaSyB85-IhbrGo2uDVIwDYvBioQKUkDTrhLTg",
+  authDomain: "eduquiz-71b98.firebaseapp.com",
+  projectId: "eduquiz-71b98",
+  storageBucket: "eduquiz-71b98.firebasestorage.app",
+  messagingSenderId: "1059135150169",
+  appId: "1:1059135150169:web:057d066454aa584ddd3948"
 };
 
 export const isConfigured = () =>
