@@ -1,10 +1,10 @@
 rules_version = '2';
-// EduQuiz — Luật truy cập Firestore cho lớp học (bản có tài khoản thành viên)
-// Cho phép đọc/ghi không cần đăng nhập ở tầng Firestore để học sinh vào
-// bằng PIN cho nhanh và để trang tĩnh kiểm tra hồ sơ thành viên.
-// Việc chặn tài khoản chưa duyệt / đã chặn / hết hạn được thực thi trong
-// app.js (kiểm tra users/{uid}.status và expiresAt ngay khi đăng nhập).
-// KHÔNG lưu thông tin nhạy cảm trong Firestore này.
+// EduQuiz — Luật truy cập Firestore (bản có thành viên, gói, kho API key, lớp học)
+// Tầng Firestore mở đọc/ghi để học sinh vào bằng PIN và trang tĩnh vận hành;
+// việc chặn tài khoản chưa duyệt / đã chặn / hết hạn và giới hạn theo gói
+// được thực thi trong app.js. KHÔNG lưu thông tin nhạy cảm ngoài API key
+// Gemini trong collection apiKeys (chỉ admin xem được trong giao diện,
+// nhưng về kỹ thuật vẫn đọc được ở tầng dữ liệu — cân nhắc khi dùng chung).
 service cloud.firestore {
   match /databases/{database}/documents {
     match /quizzes/{id} {
@@ -21,6 +21,15 @@ service cloud.firestore {
       match /devices/{deviceId} {
         allow read, write: if true;
       }
+    }
+    match /apiKeys/{id} {
+      allow read, write: if true;
+    }
+    match /plans/{id} {
+      allow read, write: if true;
+    }
+    match /classes/{id} {
+      allow read, write: if true;
     }
   }
 }

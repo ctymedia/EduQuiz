@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EduQuiz — Trò chơi học tập tương tác</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/mhchem.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 </head>
 <body>
 <header>
@@ -13,8 +19,11 @@
     <button data-nav="home">Trang chủ</button>
     <button data-nav="library">Thư viện của tôi</button>
     <button data-nav="create">+ Tạo bộ câu hỏi</button>
+    <button data-nav="import">📄 Tải file đề</button>
+    <button data-nav="ai">🤖 Tạo đề bằng AI</button>
+    <button data-nav="classes">🏫 Lớp học</button>
     <button data-nav="reports">Báo cáo</button>
-    <button data-nav="admin" id="adminBtn" style="display:none">👑 Quản lý thành viên</button>
+    <button data-nav="admin" id="adminBtn" style="display:none">👑 Quản trị</button>
   </nav>
   <div id="authArea" class="autharea"></div>
   <div id="syncStatus" class="sync">Đang kết nối…</div>
