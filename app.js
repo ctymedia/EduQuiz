@@ -461,7 +461,7 @@ function renderAI(){
   <label class="small"><b>API key Gemini của thầy/cô</b> (lấy miễn phí tại Google AI Studio — aistudio.google.com/apikey)${can('systemKeys')||me?.role==='admin'?' — hoặc để trống để dùng kho key hệ thống':''}:</label>
   <input id="aiKey" type="password" placeholder="AIza..." autocomplete="off">
   <div class="row"><a class="btn light" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">🔑 Tới trang lấy API key miễn phí</a><button class="btn" id="saveKey" type="button">💾 Lưu API key</button><span class="small" id="saveKeyMsg"></span></div>
-  <p class="small">Key nhập vào sẽ được lưu vào kho key chung của hệ thống để dùng chung, hệ thống tự xoay vòng khi key hết hạn mức hoặc lỗi.</p>
+  <p class="small">Key sẽ được lưu vào kho key chung của hệ thống để dùng chung; lần sau thầy/cô không cần nhập lại.</p>
   <button class="btn green" id="doAI">✨ Tạo câu hỏi bằng AI</button> <span id="aiStatus" class="small"></span>
   <div id="aiResult" style="margin-top:14px"></div></div>`;
   let pastedImage = null;
