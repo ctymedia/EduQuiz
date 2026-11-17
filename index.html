@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EduQuiz — Trò chơi học tập tương tác</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="logo">🎓 EduQuiz</div>
+  <nav>
+    <button data-nav="home">Trang chủ</button>
+    <button data-nav="library">Thư viện của tôi</button>
+    <button data-nav="create">+ Tạo bộ câu hỏi</button>
+    <button data-nav="reports">Báo cáo</button>
+  </nav>
+  <div id="syncStatus" class="sync">Đang kết nối…</div>
+</header>
+<main id="app"></main>
+<footer>EduQuiz — Học mà chơi, chơi mà học • Dữ liệu đồng bộ qua Firebase Firestore</footer>
+<script type="module" src="app.js"></script>
+</body>
+</html>
