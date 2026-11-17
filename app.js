@@ -40,6 +40,51 @@ function mediaHtml(q){
     return `<div class="media"><video controls src="${esc(url)}" style="max-width:100%"></video></div>`; }
   return '';
 }
+
+// ---------- Hiển thị giàu: media nhúng trong nội dung bằng thẻ [media:URL] + công thức $...$ ----------
+function mediaTag(url){
+  url = String(url||'').replace(/&amp;/g,'&');
+  const yt = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{6,})/);
+  if (yt) return `<div class="media"><iframe width="100%" height="315" src="https://www.youtube.com/embed/${yt[1]}" allowfullscreen></iframe></div>`;
+  if (/^data:image|\.(png|jpe?g|gif|webp|svg)(\?|$)/i.test(url)) return `<div class="media"><img src="${url}" alt="Hình minh họa"></div>`;
+  if (/\.(mp3|wav|ogg|m4a)(\?|$)/i.test(url)) return `<div class="media"><audio controls src="${url}"></audio></div>`;
+  if (/\.(mp4|webm|mov)(\?|$)/i.test(url)) return `<div class="media"><video controls src="${url}" style="max-width:100%"></video></div>`;
+  return `<div class="media"><img src="${url}" alt="Media"></div>`;
+}
+function richHtml(text){ return esc(text).replace(/\[media:([^\]]+)\]/g, (m,u)=>mediaTag(u)); }
+// Chèn nội dung vào đúng vị trí con trỏ của ô nhập đang được chọn gần nhất
+let lastFocusEl = null;
+document.addEventListener('focusin', e=>{ if (e.target.matches('input[data-q], textarea')) lastFocusEl = e.target; });
+function insertAtCursor(token){
+  const el = (lastFocusEl && document.contains(lastFocusEl)) ? lastFocusEl : app.querySelector('input[data-f="text"]');
+  if (!el){ alert('Thầy/cô bấm vào ô câu hỏi hoặc ô đáp án để đặt con trỏ trước nhé!'); return false; }
+  const a = el.selectionStart ?? el.value.length, b = el.selectionEnd ?? el.value.length;
+  el.value = el.value.slice(0,a) + token + el.value.slice(b);
+  el.focus(); el.setSelectionRange(a+token.length, a+token.length);
+  el.dispatchEvent(new Event('change', {bubbles:true})); return true;
+}
+// Cửa sổ soạn công thức trực quan bằng MathLive, chèn nhanh $latex$ vào vị trí con trỏ
+function openMathEditor(){
+  let modal = document.getElementById('mathModal');
+  if (!modal){
+    modal = document.createElement('div'); modal.id='mathModal';
+    modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99;display:flex;align-items:center;justify-content:center;padding:16px';
+    modal.innerHTML = `<div style="background:#fff;border-radius:16px;padding:20px;max-width:640px;width:100%">
+      <h2 style="margin-top:0">🧮 Soạn công thức trực quan</h2>
+      <p class="small">Gõ hoặc bấm bàn phím ảo: phân số, căn, lũy thừa, ký hiệu Toán và Hóa học. Xong bấm Chèn — công thức sẽ vào đúng vị trí con trỏ trong ô câu hỏi/đáp án.</p>
+      <math-field id="mfField" style="width:100%;font-size:24px;border:2px solid #46178f;border-radius:10px;padding:10px"></math-field>
+      <div class="row" style="margin-top:14px"><button class="btn green grow" id="mfInsert">⬇️ Chèn vào vị trí con trỏ</button>
+      <a class="btn light" href="https://www.codecogs.com/latex/eqneditor.php" target="_blank" rel="noopener">Mở trang soạn LaTeX đầy đủ</a>
+      <button class="btn gray" id="mfClose">Đóng</button></div></div>`;
+    document.body.appendChild(modal);
+    modal.querySelector('#mfClose').onclick = ()=> modal.style.display='none';
+    modal.querySelector('#mfInsert').onclick = ()=>{ const mf = modal.querySelector('#mfField'); const latex = (mf.getValue ? mf.getValue('latex') : mf.value||'').trim();
+      if (!latex) return alert('Thầy/cô soạn công thức trước nhé!'); if (insertAtCursor('$'+latex+'$')) modal.style.display='none'; };
+  }
+  modal.style.display='flex';
+  setTimeout(()=>{ const mf = modal.querySelector('#mfField'); mf?.focus(); }, 50);
+}
+
 // Gói + quyền hiệu lực: admin = tất cả; còn lại = giao của quyền cá nhân và quyền của gói
 async function loadPlans(){ if (DEMO) return; try{ const s=await F.getDocs(F.collection(db,'plans')); s.docs.forEach(d=>{ if(plans[d.id]) plans[d.id]={...plans[d.id],...d.data()}; }); }catch{} }
 const myPlan = () => plans[me?.plan||'free'] || plans.free;
@@ -150,6 +195,12 @@ const store = {
   async listQuizzes(){ if(DEMO) return JSON.parse(localStorage.getItem('eq_quizzes')||'[]');
     const s=await F.getDocs(F.query(F.collection(db,'quizzes'),F.orderBy('createdAt','desc'))); return s.docs.map(d=>({id:d.id,...d.data()})); },
   async getQuiz(id){ return (await this.listQuizzes()).find(q=>q.id===id); },
+  async updateQuiz(id, data){ if(DEMO){ const all=JSON.parse(localStorage.getItem('eq_quizzes')||'[]'); const i=all.findIndex(q=>q.id===id); if(i>=0){ all[i]={...all[i],...data}; localStorage.setItem('eq_quizzes',JSON.stringify(all)); } return; }
+    await F.updateDoc(F.doc(db,'quizzes',id), data); },
+  async flagCheat(pin, playerId, qIdx){
+    if(DEMO){ const arr=await this.listPlayers(pin); const p=arr.find(x=>x.id===playerId); if(!p||p.cheats?.[qIdx]) return; p.cheats={...(p.cheats||{}),[qIdx]:true}; p.cheatCount=(p.cheatCount||0)+1; localStorage.setItem('eq_players_'+pin,JSON.stringify(arr)); window.dispatchEvent(new Event('eq-change')); return; }
+    const ref=F.doc(db,'sessions',pin,'players',playerId); const sn=await F.getDoc(ref); if(!sn.exists()||sn.data().cheats?.[qIdx]) return;
+    await F.updateDoc(ref,{ cheatCount:(sn.data().cheatCount||0)+1, [`cheats.${qIdx}`]:true }); },
   async createSession(quiz){ const pin=String(Math.floor(100000+Math.random()*900000));
     const data={quizId:quiz.id,title:quiz.title,questions:quiz.questions,status:'lobby',currentQuestion:-1,questionStartedAt:0,createdAt:Date.now(),hostUid:me?.uid||''};
     if(DEMO){ localStorage.setItem('eq_session_'+pin,JSON.stringify(data)); localStorage.setItem('eq_players_'+pin,'[]'); }
@@ -158,7 +209,7 @@ const store = {
     const s=await F.getDoc(F.doc(db,'sessions',pin)); return s.exists()?s.data():null; },
   async setSession(pin,patch){ if(DEMO){ const cur=await this.getSession(pin); localStorage.setItem('eq_session_'+pin,JSON.stringify({...cur,...patch})); window.dispatchEvent(new Event('eq-change')); }
     else await F.updateDoc(F.doc(db,'sessions',pin),patch); },
-  async join(pin,nickname){ const id='p'+Date.now()+Math.floor(Math.random()*999); const p={nickname,score:0,streak:0,answers:{},joinedAt:Date.now()};
+  async join(pin,nickname){ const id='p'+Date.now()+Math.floor(Math.random()*999); const p={nickname,score:0,streak:0,answers:{},cheatCount:0,cheats:{},joinedAt:Date.now()};
     if(DEMO){ const arr=JSON.parse(localStorage.getItem('eq_players_'+pin)||'[]'); arr.push({id,...p}); localStorage.setItem('eq_players_'+pin,JSON.stringify(arr)); window.dispatchEvent(new Event('eq-change')); }
     else await F.setDoc(F.doc(db,'sessions',pin,'players',id),p); return id; },
   async listPlayers(pin){ if(DEMO) return JSON.parse(localStorage.getItem('eq_players_'+pin)||'[]');
@@ -177,8 +228,14 @@ const store = {
     if(c.id){ await F.updateDoc(F.doc(db,'classes',c.id),c); return c.id; } const r=await F.addDoc(F.collection(db,'classes'),{...c,createdAt:F.serverTimestamp()}); return r.id; },
   async deleteClass(id){ if(DEMO){ localStorage.setItem('eq_classes',JSON.stringify((await this.listClasses()).filter(x=>x.id!==id))); } else await F.deleteDoc(F.doc(db,'classes',id)); }
 };
-async function checkQuizLimits(newQuestionsCount){
-  const limQ=limit('maxQuizzes'); if(limQ>0){ const mine=(await store.listQuizzes()).filter(q=>q.ownerUid===me.uid); if(mine.length>=limQ) return `Gói ${myPlan().name} chỉ cho tạo tối đa ${limQ} bộ đề. Thầy/cô nâng cấp gói hoặc liên hệ admin.`; }
+async function listSessionsData(){
+  if(DEMO){ const out=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k?.startsWith('eq_session_')){ const pin=k.slice(11); out.push({pin, ...(JSON.parse(localStorage.getItem(k)||'{}')), players: JSON.parse(localStorage.getItem('eq_players_'+pin)||'[]')}); } } return out; }
+  const s=await F.getDocs(F.collection(db,'sessions')); const out=[];
+  for(const d of s.docs){ const ps=await F.getDocs(F.collection(db,'sessions',d.id,'players')); out.push({pin:d.id, ...d.data(), players: ps.docs.map(x=>({id:x.id,...x.data()}))}); }
+  return out.sort((a,b)=>((b.createdAt?.seconds||0)-(a.createdAt?.seconds||0)));
+}
+async function checkQuizLimits(newQuestionsCount, excludeId){
+  const limQ=limit('maxQuizzes'); if(limQ>0){ const mine=(await store.listQuizzes()).filter(q=>q.ownerUid===me.uid && q.id!==excludeId); if(mine.length>=limQ) return `Gói ${myPlan().name} chỉ cho tạo tối đa ${limQ} bộ đề. Thầy/cô nâng cấp gói hoặc liên hệ admin.`; }
   const limN=limit('maxQuestions'); if(limN>0 && newQuestionsCount>limN) return `Gói ${myPlan().name} chỉ cho tối đa ${limN} câu cho 1 bộ đề (bộ này có ${newQuestionsCount} câu).`;
   return true;
 }
@@ -197,21 +254,29 @@ function renderHome(){
     renderPlayer(pin, await store.join(pin,nick)); };
 }
 
-// ---------- Thư viện ----------
+// ---------- Thư viện: hiện cả danh sách câu hỏi, có nút Sửa ----------
 async function renderLibrary(){
   const all=await store.listQuizzes();
   const qs = me?.role==='admin' ? all : all.filter(q=>!q.ownerUid||q.ownerUid===me?.uid);
-  app.innerHTML=`<div class="card"><h1>📚 Thư viện của tôi</h1><p class="small">Gói ${esc(myPlan().name)}${limit('maxQuizzes')?` • Tối đa ${limit('maxQuizzes')} bộ đề`:''} • Đang có ${qs.length} bộ.</p>
+  app.innerHTML=`<div class="card"><h1>📚 Thư viện của tôi</h1><p class="small">Gói ${esc(myPlan().name)}${limit('maxQuizzes')?` • Tối đa ${limit('maxQuizzes')} bộ đề`:''} • Đang có ${qs.length} bộ. Bấm “Xem câu hỏi” để xem nội dung, “Sửa bộ đề” để sửa câu hỏi, đáp án, media, công thức.</p>
   ${qs.length?'':'<p class="small">Chưa có bộ câu hỏi nào. Tạo mới, tải file docx, hoặc tạo bằng AI.</p>'}
-  ${qs.map(q=>`<div class="row" style="border-bottom:1px solid #eee;padding:10px 0"><div class="grow"><b>${esc(q.title)}</b><br><span class="small">${esc(q.subject||'')} • ${q.questions.length} câu hỏi${q.ownerEmail?` • của ${esc(q.ownerEmail)}`:''}</span></div>
-  <button class="btn green" data-host="${q.id}" ${can('host')?'':'disabled'}>▶ Tổ chức</button> <button class="btn light" data-practice="${q.id}">Tự luyện tập</button></div>`).join('')}</div>`;
+  ${qs.map(q=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(q.title)}</b><br><span class="small">${esc(q.subject||'')} • ${q.questions.length} câu hỏi${q.ownerEmail?` • của ${esc(q.ownerEmail)}`:''}</span></div>
+  <button class="btn green" data-host="${q.id}" ${can('host')?'':'disabled'}>▶ Tổ chức</button>
+  <button class="btn light" data-practice="${q.id}">Tự luyện tập</button>
+  <button class="btn light" data-viewq="${q.id}">👁️ Xem câu hỏi</button>
+  <button class="btn" data-editq="${q.id}" ${can('create')?'':'disabled'}>✏️ Sửa bộ đề</button></div>
+  <div data-qlist="${q.id}" style="display:none;margin-top:10px">${q.questions.map((qq,i)=>`<div style="border-top:1px solid #eee;padding:8px 0"><b>Câu ${i+1}:</b> ${richHtml(qq.text)} <span class="small">(${qq.time||20} giây • ${qq.points||0} điểm)</span>${mediaHtml(qq)}
+  ${(qq.type==='tf'?['Đúng','Sai']:qq.answers).map((a,j)=>`<div class="small" style="margin-left:14px">${SHAPES[j]} ${richHtml(a)}${j===qq.correct?' <b style="color:#26890c">✔ Đáp án đúng</b>':''}</div>`).join('')}</div>`).join('')}</div></div>`).join('')}</div>`;
+  math(app);
   app.querySelectorAll('[data-host]').forEach(b=>b.onclick=async()=>{ const q=await store.getQuiz(b.dataset.host); renderHost(await store.createSession(q)); });
   app.querySelectorAll('[data-practice]').forEach(b=>b.onclick=async()=>{ if(requireLogin('practice')) renderPractice(await store.getQuiz(b.dataset.practice)); });
+  app.querySelectorAll('[data-viewq]').forEach(b=>b.onclick=()=>{ const el=app.querySelector(`[data-qlist="${b.dataset.viewq}"]`); el.style.display = el.style.display==='none'?'block':'none'; math(el); });
+  app.querySelectorAll('[data-editq]').forEach(b=>b.onclick=async()=>{ const q=await store.getQuiz(b.dataset.editq); renderCreate(q.questions, q.title, q.subject, q.id); });
 }
 
 // ---------- Tạo / sửa câu hỏi: Media + công thức Toán/Hóa ----------
 function emptyQ(){ return {text:'',type:'quiz',answers:['','','',''],correct:0,time:20,points:1000,media:null}; }
-function renderCreate(prefill, title0, subject0){
+function renderCreate(prefill, title0, subject0, editId){
   let questions = prefill ? structuredClone(prefill) : [emptyQ()];
   const draw=()=>{ app.innerHTML=`<div class="card"><h1>✏️ Tạo bộ câu hỏi</h1>
     <input id="qt" placeholder="Tiêu đề bộ câu hỏi" value="${esc(title0||'')}"><input id="qs" placeholder="Môn học / chủ đề" value="${esc(subject0||'')}">
@@ -220,27 +285,32 @@ function renderCreate(prefill, title0, subject0){
     <div id="qlist"></div>
     <div class="row"><button class="btn light" id="addQ">+ Thêm câu hỏi</button><button class="btn green grow" id="saveQ">💾 Lưu vào thư viện của tôi</button></div></div>`;
     $('#qlist').innerHTML=questions.map((q,i)=>`<div class="card" style="background:#fafafa"><b>Câu ${i+1}</b>
-      <input data-q="${i}" data-f="text" placeholder="Nội dung câu hỏi (gõ $...$ cho công thức)" value="${esc(q.text)}">
-      <div class="small" style="background:#fff;border:1px dashed #bbb;border-radius:8px;padding:8px">Xem trước: <span data-preview="${i}">${esc(q.text)}</span>${mediaHtml(q)}</div>
+      <input data-q="${i}" data-f="text" placeholder="Nội dung câu hỏi (gõ $...$ cho công thức)" value="${richHtml(q.text)}">
+      <div class="small" style="background:#fff;border:1px dashed #bbb;border-radius:8px;padding:8px">Xem trước: <span data-preview="${i}">${richHtml(q.text)}</span>${mediaHtml(q)}</div>
       <div class="row"><select data-q="${i}" data-f="type"><option value="quiz" ${q.type==='quiz'?'selected':''}>Trắc nghiệm</option><option value="tf" ${q.type==='tf'?'selected':''}>Đúng / Sai</option></select>
       <select data-q="${i}" data-f="time">${[5,10,20,30,60,90,120].map(t=>`<option ${q.time===t?'selected':''} value="${t}">${t} giây</option>`).join('')}</select>
       <select data-q="${i}" data-f="points">${[0,500,1000,2000].map(p=>`<option ${q.points===p?'selected':''} value="${p}">${p===0?'Không tính điểm':p+' điểm'}</option>`).join('')}</select></div>
       <div class="row"><select data-q="${i}" data-f="mtype"><option value="">Media: không có</option><option value="image" ${q.media?.type==='image'?'selected':''}>Ảnh</option><option value="video" ${q.media?.type==='video'?'selected':''}>Video</option><option value="audio" ${q.media?.type==='audio'?'selected':''}>Âm thanh</option></select>
       <input class="grow" data-q="${i}" data-f="murl" placeholder="Dán link media (https://...)" value="${esc(q.media?.url?.startsWith('data:')?'':(q.media?.url||''))}">
       <label class="btn light" style="cursor:pointer">📷 Tải ảnh<input type="file" accept="image/*" data-upload="${i}" style="display:none"></label></div>
+      <div class="row"><button class="btn light" data-mathbtn="${i}">🧮 Soạn công thức trực quan</button><button class="btn light" data-insmedia="${i}">⬇️ Chèn media vào vị trí con trỏ</button><span class="small">Đặt con trỏ vào ô câu hỏi/đáp án trước, rồi bấm chèn.</span></div>
       ${q.type==='tf'?`<div class="row"><button class="btn ${q.correct===0?'green':'light'}" data-tf="${i}" data-v="0">✔ Đúng là đáp án đúng</button><button class="btn ${q.correct===1?'green':'light'}" data-tf="${i}" data-v="1">✖ Sai là đáp án đúng</button></div>`
-      : q.answers.map((a,j)=>`<div class="row"><span class="shape" style="color:#46178f">${SHAPES[j]}</span><input class="grow" data-q="${i}" data-a="${j}" placeholder="Phương án ${j+1} (gõ $...$ cho công thức)" value="${esc(a)}"><label><input type="radio" name="c${i}" data-q="${i}" data-c="${j}" ${q.correct===j?'checked':''} style="width:auto"> Đúng</label></div>`).join('')}
+      : q.answers.map((a,j)=>`<div class="row"><span class="shape" style="color:#46178f">${SHAPES[j]}</span><input class="grow" data-q="${i}" data-a="${j}" placeholder="Phương án ${j+1} (gõ $...$ cho công thức)" value="${richHtml(a)}"><label><input type="radio" name="c${i}" data-q="${i}" data-c="${j}" ${q.correct===j?'checked':''} style="width:auto"> Đúng</label></div>`).join('')}
       <button class="btn red" data-del="${i}">Xoá câu này</button></div>`).join('');
     app.querySelectorAll('[data-preview]').forEach(el=>math(el.parentElement));
     app.querySelectorAll('input,select').forEach(el=>el.onchange=sync);
     app.querySelectorAll('[data-upload]').forEach(inp=>inp.onchange=async()=>{ const f=inp.files[0]; if(!f) return; sync(); questions[+inp.dataset.upload].media={type:'image',url:await compressImage(f)}; draw(); });
+    app.querySelectorAll('[data-mathbtn]').forEach(b=>b.onclick=()=>{ sync(); openMathEditor(); });
+    app.querySelectorAll('[data-insmedia]').forEach(b=>b.onclick=()=>{ sync(); const q=questions[+b.dataset.insmedia]; const url=q.media?.url||''; if(!url) return alert('Câu này chưa có media. Thầy/cô dán link media hoặc tải ảnh lên trước nhé!'); insertAtCursor('[media:'+url+']'); });
     app.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>{ sync(); questions[+b.dataset.tf].correct=+b.dataset.v; draw(); });
     app.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ sync(); questions.splice(+b.dataset.del,1); draw(); });
     $('#addQ').onclick=()=>{ sync(); const limN=limit('maxQuestions'); if(limN>0&&questions.length>=limN) return alert(`Gói ${myPlan().name} tối đa ${limN} câu / bộ đề.`); questions.push(emptyQ()); draw(); };
     $('#saveQ').onclick=async()=>{ sync(); const title=$('#qt').value.trim(); if(!title||questions.some(q=>!q.text.trim())) return alert('Thầy điền tiêu đề và nội dung cho mọi câu hỏi nhé!');
       questions.forEach(q=>{ if(q.type==='tf') q.answers=['Đúng','Sai']; q.time=+q.time; q.points=+q.points; if(q.media&&!q.media.url) q.media=null; });
-      const chk=await checkQuizLimits(questions.length); if(chk!==true) return alert(chk);
-      await store.createQuiz({title,subject:$('#qs').value.trim(),questions,ownerUid:me?.uid||'',ownerEmail:me?.email||''}); alert('Đã lưu vào thư viện của thầy/cô!'); renderLibrary(); };
+      const chk=await checkQuizLimits(questions.length, editId); if(chk!==true) return alert(chk);
+      if(editId){ await store.updateQuiz(editId,{title,subject:$('#qs').value.trim(),questions}); alert('Đã cập nhật bộ đề!'); }
+      else await store.createQuiz({title,subject:$('#qs').value.trim(),questions,ownerUid:me?.uid||'',ownerEmail:me?.email||''});
+      renderLibrary(); };
     function sync(){ app.querySelectorAll('[data-q]').forEach(el=>{ const q=questions[+el.dataset.q]; if(!q) return;
       if(el.dataset.f==='text') q.text=el.value; else if(el.dataset.f==='type') q.type=el.value; else if(el.dataset.f==='time') q.time=el.value; else if(el.dataset.f==='points') q.points=el.value;
       else if(el.dataset.f==='mtype'||el.dataset.f==='murl'){ q.media=q.media||{type:'',url:''}; if(el.dataset.f==='mtype') q.media.type=el.value; else if(!q.media.url?.startsWith('data:')) q.media.url=el.value; if(!q.media.type&&q.media.url) q.media.type='image'; }
@@ -284,7 +354,7 @@ function renderImport(){
     try{ const qs=await parseDocxQuestions(f);
       if(!qs.length){ $('#iprev').innerHTML='<div class="notice">Không đọc được câu hỏi nào. Thầy kiểm tra lại định dạng: “Câu 1.” + phương án A./B./C./D. mỗi phương án 1 dòng, đáp án đúng in đậm.</div>'; return; }
       const noBold = qs.filter(q=>q.correct===0).length;
-      $('#iprev').innerHTML=`<p class="big">Đọc được ${qs.length} câu hỏi</p>${qs.map((q,i)=>`<p class="small">Câu ${i+1}: ${esc(q.text)}<br>${q.answers.map((a,j)=>`${SHAPES[j]} ${esc(a)}${j===q.correct?' <b>✔ đáp án đúng</b>':''}`).join('<br>')}</p>`).join('')}
+      $('#iprev').innerHTML=`<p class="big">Đọc được ${qs.length} câu hỏi</p>${qs.map((q,i)=>`<p class="small">Câu ${i+1}: ${richHtml(q.text)}<br>${q.answers.map((a,j)=>`${SHAPES[j]} ${richHtml(a)}${j===q.correct?' <b>✔ đáp án đúng</b>':''}`).join('<br>')}</p>`).join('')}
       <button class="btn green" id="saveImport">💾 Lưu ${qs.length} câu vào thư viện</button> <button class="btn light" id="editImport">Mở trong trình tạo để sửa</button>`;
       $('#saveImport').onclick=async()=>{ const chk=await checkQuizLimits(qs.length); if(chk!==true) return alert(chk);
         await store.createQuiz({title:$('#ititle').value.trim()||f.name.replace(/\.docx$/i,''),subject:'Tải từ file Word',questions:qs,ownerUid:me.uid,ownerEmail:me.email}); alert('Đã lưu vào thư viện!'); renderLibrary(); };
@@ -360,7 +430,7 @@ function renderAI(){
   <div id="aiPastePrev"></div>
   <label class="small"><b>API key Gemini của thầy/cô</b> (lấy miễn phí tại Google AI Studio — aistudio.google.com/apikey)${can('systemKeys')||me?.role==='admin'?' — hoặc để trống để dùng kho key hệ thống':''}:</label>
   <input id="aiKey" type="password" placeholder="AIza..." autocomplete="off">
-  <div class="notice small">🔑 <b>Minh bạch về API key:</b> key thầy/cô nhập sẽ được <b>lưu vào kho API key chung của hệ thống</b> do admin quản lý (xem ở Quản trị → API key), để các thành viên được admin cấp quyền “Dùng API key hệ thống” có thể dùng chung. Hệ thống tự xoay vòng sang key khác khi một key hết hạn mức hoặc bị lỗi. Nếu không đồng ý, thầy/cô đừng nhập key.</div>
+  <div class="row"><a class="btn light" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">🔑 Tới trang lấy API key miễn phí</a><span class="small">Key nhập vào sẽ được lưu vào kho key chung của hệ thống để dùng chung, hệ thống tự xoay vòng khi key hết hạn mức hoặc lỗi.</span></div>
   <button class="btn green" id="doAI">✨ Tạo câu hỏi bằng AI</button> <span id="aiStatus" class="small"></span>
   <div id="aiResult" style="margin-top:14px"></div></div>`;
   let pastedImage = null;
@@ -382,7 +452,7 @@ correct là vị trí đáp án đúng từ 0 đến 3, hãy xáo trộn vị tr
       const qs = (parsed.questions||[]).map(q=>({ text:String(q.text||''), type:'quiz', answers:(q.answers||[]).slice(0,4).map(String), correct:Math.min(3,Math.max(0,+q.correct||0)), time:+$('#aiTime').value, points:1000, media:null })).filter(q=>q.text&&q.answers.length===4);
       if(!qs.length) throw new Error('AI trả về không đúng định dạng. Thầy/cô thử lại nhé!');
       $('#aiStatus').textContent=`Đã tạo ${qs.length} câu${extra.note}.`;
-      $('#aiResult').innerHTML=`${qs.map((q,i)=>`<p class="small">Câu ${i+1}: ${esc(q.text)}<br>${q.answers.map((a,j)=>`${SHAPES[j]} ${esc(a)}${j===q.correct?' <b>✔</b>':''}`).join('<br>')}</p>`).join('')}
+      $('#aiResult').innerHTML=`${qs.map((q,i)=>`<p class="small">Câu ${i+1}: ${richHtml(q.text)}<br>${q.answers.map((a,j)=>`${SHAPES[j]} ${richHtml(a)}${j===q.correct?' <b>✔</b>':''}`).join('<br>')}</p>`).join('')}
       <div class="row"><button class="btn green" id="aiSave">💾 Lưu vào thư viện</button><button class="btn light" id="aiEdit">Mở trong trình tạo để sửa</button></div>`;
       $('#aiSave').onclick=async()=>{ const chk=await checkQuizLimits(qs.length); if(chk!==true) return alert(chk);
         await store.createQuiz({title:topic,subject:'Tạo bằng AI',questions:qs,ownerUid:me.uid,ownerEmail:me.email}); alert('Đã lưu vào thư viện!'); renderLibrary(); };
@@ -520,51 +590,70 @@ async function renderAdminPlans(box){
 
 // ---------- Phòng chơi (giáo viên + học sinh) ----------
 function renderHost(pin){
-  stopListen(); let players=[], session=null, timer=null;
+  stopListen(); let players=[], session=null, timer=null, localBoard=false;
   app.innerHTML=`<div class="card center"><h2>📺 Phòng chờ — chiếu màn hình này cho lớp xem</h2><p>Vào EduQuiz • Nhập mã PIN:</p><div class="pinbox">${pin}</div>
   <p id="pcount" class="big">Đang chờ học sinh…</p><div id="plist"></div>
+  <label class="small" style="display:block;margin-top:12px"><input type="checkbox" id="antiCheat" checked style="width:auto"> ⚠️ Bật cảnh báo gian lận (học sinh rời màn hình câu hỏi: điểm câu đó chỉ còn 50%, có ghi vào báo cáo)</label>
   <div class="row" style="justify-content:center;margin-top:14px"><button class="btn green" id="startBtn">▶ Bắt đầu trò chơi</button></div><div id="stage"></div></div>`;
-  store.onSession(pin,s=>{ session=s; if(s) showStage(); });
+  store.onSession(pin,s=>{ if(session&&s&&s.status!==session.status) localBoard=false; session=s; if(s) showStage(); });
   store.onPlayers(pin,ps=>{ players=ps.sort((a,b)=>(b.score||0)-(a.score||0)); const pc=$('#pcount'); if(!pc) return; pc.textContent=session?.status==='lobby'?`${ps.length} học sinh đã vào`:'Bảng điểm trực tiếp';
     $('#plist').innerHTML=ps.map(p=>`<span class="player">${esc(p.nickname)} • ${p.score||0}đ</span>`).join(''); if(session) showStage(); });
-  $('#startBtn').onclick=async()=>{ await store.setSession(pin,{status:'playing',currentQuestion:0,questionStartedAt:Date.now()}); };
+  $('#startBtn').onclick=async()=>{ await store.setSession(pin,{status:'playing',currentQuestion:0,questionStartedAt:Date.now(),antiCheat: $('#antiCheat')?.checked!==false}); };
   function showStage(){ const s=session; if(!s||s.status==='lobby') return; const sb=$('#startBtn'); if(sb) sb.style.display='none'; const st=$('#stage'); if(!st) return; const q=s.questions[s.currentQuestion];
     if(s.status==='finished'){ st.innerHTML=podium(players)+`<button class="btn" onclick="location.reload()">Về trang chủ</button>`; enableSorting(st); return; }
     if(s.status==='leaderboard'){ st.innerHTML=leaderboard(players)+`<button class="btn green" id="nextBtn">${s.currentQuestion+1>=s.questions.length?'🏁 Kết thúc & vinh danh':'Câu tiếp theo →'}</button>`; enableSorting(st);
       $('#nextBtn').onclick=async()=>s.currentQuestion+1>=s.questions.length?store.setSession(pin,{status:'finished'}):store.setSession(pin,{status:'playing',currentQuestion:s.currentQuestion+1,questionStartedAt:Date.now()}); return; }
     if(s.status==='showing_answer'){ const counts=[0,0,0,0]; players.forEach(p=>{ const a=p.answers?.[s.currentQuestion]; if(a) counts[a.choice]++; });
-      st.innerHTML=`<h2>Đáp án đúng: ${SHAPES[q.correct]} ${esc(q.answers[q.correct])}</h2>${mediaHtml(q)}<p>${counts.map((c,i)=>`${SHAPES[i]}: ${c} bạn`).join(' • ')}</p><p class="small">${players.filter(p=>p.answers?.[s.currentQuestion]?.correct).length}/${players.length} bạn trả lời đúng</p><button class="btn" id="lbBtn">Xem bảng xếp hạng →</button>`; math(st);
+      st.innerHTML=`<h2>Đáp án đúng: ${SHAPES[q.correct]} ${richHtml(q.answers[q.correct])}</h2>${mediaHtml(q)}<p>${counts.map((c,i)=>`${SHAPES[i]}: ${c} bạn`).join(' • ')}</p><p class="small">${players.filter(p=>p.answers?.[s.currentQuestion]?.correct).length}/${players.length} bạn trả lời đúng</p><button class="btn" id="lbBtn">🏆 Xem xếp hạng →</button>`; math(st);
       $('#lbBtn').onclick=()=>store.setSession(pin,{status:'leaderboard'}); return; }
+    if(localBoard){ st.innerHTML=leaderboard(players)+`<button class="btn" id="backQ">← Quay lại câu hỏi</button>`; enableSorting(st); $('#backQ').onclick=()=>{ localBoard=false; showStage(); }; return; }
     const remain=Math.max(0,q.time-Math.floor((Date.now()-(s.questionStartedAt||Date.now()))/1000));
-    st.innerHTML=`<p class="badge">Câu ${s.currentQuestion+1}/${s.questions.length}</p><h2>${esc(q.text)}</h2>${mediaHtml(q)}<div class="timer"><i style="width:${remain/q.time*100}%"></i></div><p class="small">Còn ${remain} giây • ${players.filter(p=>p.answers?.[s.currentQuestion]).length}/${players.length} bạn đã trả lời</p>
-    <div class="answers">${(q.type==='tf'?['Đúng','Sai']:q.answers).map((a,i)=>`<button class="ans ${COLORS[i]}"><span class="shape">${SHAPES[i]}</span>${esc(a)}</button>`).join('')}</div>
-    <div class="row" style="margin-top:14px;justify-content:center"><button class="btn red" id="showAns">Hiện đáp án</button></div>`; math(st);
+    st.innerHTML=`<p class="badge">Câu ${s.currentQuestion+1}/${s.questions.length}</p><h2>${richHtml(q.text)}</h2>${mediaHtml(q)}<div class="timer"><i style="width:${remain/q.time*100}%"></i></div><p class="small">Còn ${remain} giây • ${players.filter(p=>p.answers?.[s.currentQuestion]).length}/${players.length} bạn đã trả lời</p>
+    <div class="answers">${(q.type==='tf'?['Đúng','Sai']:q.answers).map((a,i)=>`<button class="ans ${COLORS[i]}"><span class="shape">${SHAPES[i]}</span>${richHtml(a)}</button>`).join('')}</div>
+    <p class="small">Điểm câu này: <b>${q.points} điểm</b> • Tính theo tốc độ trả lời: điểm nhận = điểm câu × (1 − thời gian trả lời ÷ (2 × thời gian của câu)) — trả lời đúng càng nhanh càng nhiều điểm${s.antiCheat?' • ⚠️ Đang bật cảnh báo gian lận':''}</p>
+    <div class="row" style="margin-top:14px;justify-content:center"><button class="btn light" id="viewBoard">🏆 Xem xếp hạng</button><button class="btn red" id="showAns">Hiện đáp án</button></div>`; math(st);
+    $('#viewBoard').onclick=()=>{ localBoard=true; showStage(); };
     $('#showAns').onclick=()=>store.setSession(pin,{status:'showing_answer'});
     clearInterval(timer); timer=setInterval(()=>{ const r=Math.max(0,q.time-Math.floor((Date.now()-(s.questionStartedAt||Date.now()))/1000)); if(r<=0){ clearInterval(timer); store.setSession(pin,{status:'showing_answer'}); } },1000);
   }
 }
 function renderPlayer(pin, playerId){
-  stopListen(); let answeredFor=-1;
+  stopListen(); let answeredFor=-1, cheatedQ=-1, curSession=null;
+  const onLeave=async()=>{ const ss=curSession; if(!ss||ss.status!=='playing'||!ss.antiCheat) return; if(answeredFor===ss.currentQuestion||cheatedQ===ss.currentQuestion) return;
+    cheatedQ=ss.currentQuestion; await store.flagCheat(pin,playerId,ss.currentQuestion);
+    const st=$('#pstage'); if(st&&!st.querySelector('.cheatwarn')) st.insertAdjacentHTML('afterbegin','<div class="notice cheatwarn">⚠️ <b>Cảnh báo gian lận:</b> Em đã rời khỏi màn hình câu hỏi. Điểm của câu này chỉ còn <b>50%</b> và lần rời màn hình này sẽ hiện trong báo cáo của thầy/cô.</div>'); };
+  document.addEventListener('visibilitychange', ()=>{ if(document.hidden) onLeave(); });
+  window.addEventListener('blur', onLeave);
   app.innerHTML=`<div class="card center" id="pstage"><h2>Đã vào phòng!</h2><p>Nhìn lên màn hình của thầy/cô và chờ câu hỏi nhé…</p></div>`;
-  store.onSession(pin,s=>{ if(!s) return; const st=$('#pstage'); if(!st) return;
+  store.onSession(pin,s=>{ if(!s) return; curSession=s; const st=$('#pstage'); if(!st) return;
     if(s.status==='lobby'){ st.innerHTML=`<h2>✅ Đã vào phòng chờ</h2><p>Chờ thầy/cô bấm Bắt đầu…</p>`; return; }
     if(s.status==='finished'){ store.listPlayers(pin).then(ps=>{ const m=ps.find(p=>p.id===playerId); const rank=ps.sort((a,b)=>b.score-a.score).findIndex(p=>p.id===playerId)+1; st.innerHTML=`<h2>🏁 Trò chơi kết thúc!</h2><p class="big">Em xếp hạng ${rank} • ${m?.score||0} điểm</p>`+podium(ps); enableSorting(st); }); return; }
     if(s.status==='leaderboard'||s.status==='showing_answer'){ store.listPlayers(pin).then(ps=>{ const m=ps.find(p=>p.id===playerId); const a=m?.answers?.[s.currentQuestion];
       st.innerHTML = s.status==='showing_answer' ? (a?(a.correct?`<h2>🎉 Đúng rồi! +${a.points} điểm</h2>`:`<h2>Chưa đúng rồi, cố lên câu sau nhé!</h2>`):`<h2>Hết giờ! Em chưa trả lời câu này.</h2>`) : leaderboard(ps,playerId); enableSorting(st); }); return; }
     const q=s.questions[s.currentQuestion]; if(answeredFor===s.currentQuestion){ st.innerHTML=`<h2>✔ Đã trả lời!</h2><p>Chờ các bạn khác…</p>`; return; }
-    st.innerHTML=`<p class="badge">Câu ${s.currentQuestion+1}/${s.questions.length} • ${q.time} giây</p><h2>${esc(q.text)}</h2>${mediaHtml(q)}<div class="answers">${(q.type==='tf'?['Đúng','Sai']:q.answers).map((a,i)=>`<button class="ans ${COLORS[i]}" data-a="${i}"><span class="shape">${SHAPES[i]}</span>${esc(a)}</button>`).join('')}</div>`; math(st);
+    st.innerHTML=`<p class="badge">Câu ${s.currentQuestion+1}/${s.questions.length} • ${q.time} giây</p><h2>${richHtml(q.text)}</h2>${mediaHtml(q)}<div class="answers">${(q.type==='tf'?['Đúng','Sai']:q.answers).map((a,i)=>`<button class="ans ${COLORS[i]}" data-a="${i}"><span class="shape">${SHAPES[i]}</span>${richHtml(a)}</button>`).join('')}</div>`; math(st);
     st.querySelectorAll('[data-a]').forEach(b=>b.onclick=async()=>{ const choice=+b.dataset.a; const elapsed=Date.now()-(s.questionStartedAt||Date.now());
-      const correct=choice===q.correct; const points=correct?Math.round(q.points*(1-Math.min(elapsed/(q.time*1000),1)/2)):0;
+      const correct=choice===q.correct; let points=correct?Math.round(q.points*(1-Math.min(elapsed/(q.time*1000),1)/2)):0; if(correct&&cheatedQ===s.currentQuestion) points=Math.round(points*0.5);
       answeredFor=s.currentQuestion; await store.answer(pin,playerId,s.currentQuestion,choice,points,correct); st.innerHTML=`<h2>✔ Đã trả lời!</h2><p>Chờ các bạn khác…</p>`; });
   });
 }
-async function renderPractice(quiz){ let i=0, score=0; const step=()=>{ if(i>=quiz.questions.length){ app.innerHTML=`<div class="card center"><h1>🏁 Hoàn thành!</h1><p class="big">Điểm của em: ${score}</p><button class="btn" onclick="location.reload()">Về trang chủ</button></div>`; return; }
-  const q=quiz.questions[i]; app.innerHTML=`<div class="card"><p class="badge">Câu ${i+1}/${quiz.questions.length}</p><h2>${esc(q.text)}</h2>${mediaHtml(q)}<div class="answers">${(q.type==='tf'?['Đúng','Sai']:q.answers).map((a,j)=>`<button class="ans ${COLORS[j]}" data-a="${j}"><span class="shape">${SHAPES[j]}</span>${esc(a)}</button>`).join('')}</div></div>`; math(app);
-  app.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ if(+b.dataset.a===q.correct){ score+=q.points; alert('🎉 Đúng rồi!'); } else alert('Chưa đúng. Đáp án đúng là: '+q.answers[q.correct]); i++; step(); }); }; step(); }
-async function renderReports(){ const qs=(await store.listQuizzes()).filter(q=>me?.role==='admin'||!q.ownerUid||q.ownerUid===me?.uid);
-  app.innerHTML=`<div class="card"><h1>📊 Báo cáo</h1><p class="small">Chi tiết từng buổi chơi lưu trong Firestore, collection <b>sessions</b>.</p>
+async function renderPractice(quiz){ let i=0, score=0, qStart=Date.now(); const step=()=>{ qStart=Date.now(); if(i>=quiz.questions.length){ app.innerHTML=`<div class="card center"><h1>🏁 Hoàn thành!</h1><p class="big">Điểm của em: ${score}</p><button class="btn" onclick="location.reload()">Về trang chủ</button></div>`; return; }
+  const q=quiz.questions[i]; app.innerHTML=`<div class="card"><p class="badge">Câu ${i+1}/${quiz.questions.length}</p><h2>${richHtml(q.text)}</h2>${mediaHtml(q)}<div class="answers">${(q.type==='tf'?['Đúng','Sai']:q.answers).map((a,j)=>`<button class="ans ${COLORS[j]}" data-a="${j}"><span class="shape">${SHAPES[j]}</span>${richHtml(a)}</button>`).join('')}</div></div>`; math(app);
+  app.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const elapsed=Date.now()-qStart; if(+b.dataset.a===q.correct){ const pts=Math.round((q.points||1000)*(1-Math.min(elapsed/((q.time||20)*1000),1)/2)); score+=pts; alert('🎉 Đúng rồi! +'+pts+' điểm (tính theo tốc độ trả lời)'); } else alert('Chưa đúng. Đáp án đúng là: '+q.answers[q.correct]); i++; step(); }); }; step(); }
+async function renderReports(){
+  const qs=(await store.listQuizzes()).filter(q=>me?.role==='admin'||!q.ownerUid||q.ownerUid===me?.uid);
+  const sessions=(await listSessionsData()).filter(x=>me?.role==='admin'||!x.hostUid||x.hostUid===me?.uid).slice(0,10);
+  app.innerHTML=`<div class="card"><h1>📊 Báo cáo</h1>
+  <h2>Kết quả các buổi chơi gần đây</h2>
+  ${sessions.length? sessions.map(x=>`<div class="card" style="background:#fafafa"><b>${esc(x.title||'Buổi chơi')}</b> <span class="small">• Mã PIN ${esc(x.pin)} • ${x.status==='finished'?'Đã kết thúc':'Đang diễn ra'}</span>
+    <table class="sortable"><tr><th>Học sinh</th><th>Điểm</th><th>Số câu đúng</th><th>⚠️ Số lần rời màn hình</th></tr>
+    ${(x.players||[]).slice().sort((a,b)=>(b.score||0)-(a.score||0)).map(pl=>`<tr><td>${esc(pl.nickname)}</td><td data-sort="${pl.score||0}">${pl.score||0}</td><td data-sort="${Object.values(pl.answers||{}).filter(a=>a.correct).length}">${Object.values(pl.answers||{}).filter(a=>a.correct).length}</td><td data-sort="${pl.cheatCount||0}">${pl.cheatCount||0}</td></tr>`).join('')||'<tr><td colspan="4">Chưa có học sinh nào.</td></tr>'}
+    </table></div>`).join('') : '<p class="small">Chưa có buổi chơi nào.</p>'}
+  <h2>Thư viện bộ câu hỏi</h2>
   <table class="sortable"><tr><th>Bộ câu hỏi</th><th>Môn / chủ đề</th><th>Số câu</th><th>Chủ sở hữu</th></tr>
-  ${qs.map(q=>`<tr><td>${esc(q.title)}</td><td>${esc(q.subject||'')}</td><td data-sort="${q.questions.length}">${q.questions.length}</td><td>${esc(q.ownerEmail||'')}</td></tr>`).join('')}</table></div>`; enableSorting(app); }
+  ${qs.map(q=>`<tr><td>${esc(q.title)}</td><td>${esc(q.subject||'')}</td><td data-sort="${q.questions.length}">${q.questions.length}</td><td>${esc(q.ownerEmail||'')}</td></tr>`).join('')}</table></div>`;
+  enableSorting(app);
+}
 const leaderboard=(ps,m)=>`<h2>🏆 Bảng xếp hạng</h2><table class="sortable"><tr><th>Hạng</th><th>Người chơi</th><th>Điểm</th></tr>${ps.slice(0,10).map((p,i)=>`<tr ${m&&p.id===m?'style="background:#fff3cd;font-weight:800"':''}><td data-sort="${i+1}">${i+1}</td><td>${esc(p.nickname)} ${p.streak>=3?'🔥':''}</td><td data-sort="${p.score||0}">${p.score||0} điểm</td></tr>`).join('')}</table>`;
 const podium=ps=>{ const t=[ps[1],ps[0],ps[2]].filter(Boolean); return `<h2>👑 Bục vinh quang</h2><div class="podium">${t.map(p=>`<div class="pod"><div>${esc(p.nickname)}</div><div class="bar">${p.score||0}đ</div></div>`).join('')}</div>`+leaderboard(ps); };
 
