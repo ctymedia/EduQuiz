@@ -152,6 +152,7 @@ document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{ stopListen();
   else if(n==='import'){ if(requireLogin('upload')) renderImport(); }
   else if(n==='ai'){ if(requireLogin('ai')) renderAI(); }
   else if(n==='classes'){ if(requireLogin('classes')) renderClasses(); }
+  else if(n==='contests'){ if(requireLogin('create')) renderContests(); }
   else if(n==='reports'){ if(requireLogin('reports')) renderReports(); }
 });
 
@@ -246,12 +247,18 @@ function renderHome(){
   <div class="card join"><h1>Tham gia trò chơi</h1><p class="small">Học sinh nhập mã PIN do giáo viên cung cấp — không cần tài khoản</p>
   <input id="pin" inputmode="numeric" maxlength="6" placeholder="Mã PIN 6 số" style="text-align:center;font-size:22px;font-weight:800">
   <input id="nick" placeholder="Tên của em (biệt danh)"><button class="btn green" style="width:100%" id="joinBtn">Vào chơi →</button></div>
+  <div class="card join"><h1>🏆 Vào phòng thi</h1><p class="small">Học sinh nhập mã phòng thi do giáo viên cấp — chỉ vào được trong khung giờ thi</p>
+  <input id="ccode" inputmode="numeric" maxlength="6" placeholder="Mã phòng thi 6 số" style="text-align:center;font-size:22px;font-weight:800">
+  <input id="cnick" placeholder="Họ tên của em"><button class="btn" style="width:100%" id="cjoinBtn">Vào phòng thi →</button></div>
   <div class="card center"><h2>Thầy/cô tổ chức trò chơi?</h2><p class="small">${me?`Đang đăng nhập: <b>${esc(me.displayName||me.email)}</b> • Gói <b>${esc(myPlan().name)}</b> • Hạn dùng: ${fmtDate(me.expiresAt)}`:'Đăng nhập để tạo thư viện và kho câu hỏi riêng. Chưa có tài khoản thì Đăng ký — admin phê duyệt xong mới đăng nhập được và tự động dùng gói Free.'}</p>
   <button class="btn" onclick="document.querySelector('[data-nav=library]').click()">Mở thư viện của tôi →</button></div>`;
   $('#joinBtn').onclick=async()=>{ const pin=$('#pin').value.trim(), nick=$('#nick').value.trim();
     if(pin.length!==6||!nick) return alert('Em nhập đủ mã PIN 6 số và tên nhé!');
     const s=await store.getSession(pin); if(!s) return alert('Không tìm thấy phòng chơi này. Em kiểm tra lại mã PIN nhé!');
     renderPlayer(pin, await store.join(pin,nick)); };
+  $('#cjoinBtn').onclick=async()=>{ const code=$('#ccode').value.trim(), nick=$('#cnick').value.trim();
+    if(code.length!==6||!nick) return alert('Em nhập đủ mã phòng thi 6 số và họ tên nhé!');
+    renderContestGate(code, nick); };
 }
 
 // ---------- Thư viện: hiện cả danh sách câu hỏi, có nút Sửa ----------
@@ -381,21 +388,27 @@ async function poolKeys(){
 async function markKey(id, patch){ if(!DEMO) await F.updateDoc(F.doc(db,'apiKeys',id), patch); }
 const GEMINI_MODELS = ['gemini-3.8-flash','gemini-3.5-flash','gemini-2.5-flash','gemini-2.0-flash'];
 const isModelError = e => e?.status===404 || /model[^.]*?(not found|no longer available|not supported)|is not found for API version/i.test(e?.message||'');
+const isTransientError = e => e?.status===503 || e?.status===500 || /high demand|overloaded|UNAVAILABLE|temporarily|try again later/i.test(e?.message||'');
+const sleepMs = ms => new Promise(r=>setTimeout(r,ms));
 async function callGemini(parts, key){
-  let lastErr = null;
-  for (const model of GEMINI_MODELS){
-    try{
-      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent?key='+encodeURIComponent(key), {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ contents:[{parts}], generationConfig:{ responseMimeType:'application/json', temperature:0.7 } }) });
-      const j = await r.json().catch(()=>({}));
-      if (!r.ok){ const err=new Error(j?.error?.message||('HTTP '+r.status)); err.status=r.status; throw err; }
-      return j?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'';
-    }catch(e){ lastErr=e; if (isModelError(e)) continue; throw e; }
+  let lastErr = null, sawTransient = false;
+  for (let round=0; round<2; round++){
+    for (const model of GEMINI_MODELS){
+      try{
+        const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent?key='+encodeURIComponent(key), {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ contents:[{parts}], generationConfig:{ responseMimeType:'application/json', temperature:0.7 } }) });
+        const j = await r.json().catch(()=>({}));
+        if (!r.ok){ const err=new Error(j?.error?.message||('HTTP '+r.status)); err.status=r.status; throw err; }
+        return j?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'';
+      }catch(e){ lastErr=e; if (isModelError(e)) continue; if (isTransientError(e)){ sawTransient=true; continue; } throw e; }
+    }
+    if (round===0 && sawTransient) await sleepMs(3000); // Google qua tai: nghi 3 giay roi thu lai tu dau
   }
+  if (sawTransient){ const err=new Error('Máy chủ AI của Google đang quá tải do nhu cầu cao (lỗi tạm thời phía Google, không phải lỗi API key). Thầy/cô chờ khoảng 1 phút rồi bấm tạo lại nhé.'); err.transient=true; throw err; }
   const err = new Error('Không có model Gemini nào khả dụng lúc này. Lỗi cuối: '+(lastErr?.message||'')); err.modelError = true; err.status = lastErr?.status; throw err;
 }
-// Thử lần lượt: key người dùng vừa nhập (nếu có) -> các key sẵn sàng trong kho (nếu được quyền dùng key hệ thống), xoay vòng khi hết hạn mức/lỗi
+
 async function generateWithRotation(parts, ownKey){
   const candidates = [];
   if (ownKey){ const id = await addKeyToPool(ownKey, me?.email); candidates.push({id, key:ownKey, own:true}); }
@@ -405,6 +418,7 @@ async function generateWithRotation(parts, ownKey){
   for (const c of candidates){
     try{ const text = await callGemini(parts, c.key); if (c.id) await markKey(c.id, { status:'ready', lastUsedAt: Date.now(), lastError:'' }); return text; }
     catch(e){ lastErr = e;
+      if (e.transient || isTransientError(e)){ const te = new Error('Máy chủ AI của Google đang quá tải do nhu cầu cao (lỗi tạm thời phía Google, không phải lỗi API key). Thầy/cô chờ khoảng 1 phút rồi bấm tạo lại nhé.'); te.transient = true; throw te; }
       if (e.modelError || isModelError(e)) throw e; // Loi model la loi cua he thong, khong phai loi cua key -> khong danh dau key, khong thu key khac
       const quota = e.status===429 || /quota|rate|RESOURCE_EXHAUSTED/i.test(e.message||'');
       if (c.id) await markKey(c.id, { status: quota?'quota':'error', lastError: String(e.message||e).slice(0,200), lastUsedAt: Date.now() });
@@ -442,14 +456,19 @@ function renderAI(){
   <div id="aiPastePrev"></div>
   <label class="small"><b>API key Gemini của thầy/cô</b> (lấy miễn phí tại Google AI Studio — aistudio.google.com/apikey)${can('systemKeys')||me?.role==='admin'?' — hoặc để trống để dùng kho key hệ thống':''}:</label>
   <input id="aiKey" type="password" placeholder="AIza..." autocomplete="off">
-  <div class="row"><a class="btn light" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">🔑 Tới trang lấy API key miễn phí</a><span class="small">Key nhập vào sẽ được lưu vào kho key chung của hệ thống để dùng chung, hệ thống tự xoay vòng khi key hết hạn mức hoặc lỗi.</span></div>
+  <div class="row"><a class="btn light" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">🔑 Tới trang lấy API key miễn phí</a><button class="btn" id="saveKey" type="button">💾 Lưu API key</button><span class="small" id="saveKeyMsg"></span></div>
+  <p class="small">Key nhập vào sẽ được lưu vào kho key chung của hệ thống để dùng chung, hệ thống tự xoay vòng khi key hết hạn mức hoặc lỗi.</p>
   <button class="btn green" id="doAI">✨ Tạo câu hỏi bằng AI</button> <span id="aiStatus" class="small"></span>
   <div id="aiResult" style="margin-top:14px"></div></div>`;
   let pastedImage = null;
+  const savedKey = localStorage.getItem('eq_my_key')||''; if (savedKey && !$('#aiKey').value) $('#aiKey').value = savedKey;
+  $('#saveKey').onclick = async()=>{ const k = $('#aiKey').value.trim(); if(!k) return alert('Thầy/cô dán API key vào ô trước rồi bấm Lưu nhé!');
+    localStorage.setItem('eq_my_key', k); try{ await addKeyToPool(k, me?.email); }catch(e){}
+    $('#saveKeyMsg').textContent = 'Đã lưu API key thành công ✔ Từ nay thầy/cô không cần dán lại key nữa.'; };
   $('#aiPaste').addEventListener('paste', e=>{ const item=[...(e.clipboardData?.items||[])].find(x=>x.type.startsWith('image/')); if(item){ e.preventDefault(); pastedImage=item.getAsFile(); $('#aiPastePrev').innerHTML='<p class="small">Đã nhận ảnh dán vào ✔</p>'; } });
   $('#doAI').onclick=async()=>{
     const topic=$('#aiTopic').value.trim(); if(!topic) return alert('Thầy/cô nhập chủ đề trước nhé!');
-    const count=Math.max(1,Math.min(40,+$('#aiCount').value||10)), ownKey=$('#aiKey').value.trim();
+    const count=Math.max(1,Math.min(40,+$('#aiCount').value||10)), ownKey=($('#aiKey').value.trim()||localStorage.getItem('eq_my_key')||''); if($('#aiKey').value.trim()) localStorage.setItem('eq_my_key',$('#aiKey').value.trim());
     $('#aiStatus').textContent='Đang tạo câu hỏi, thầy/cô chờ một chút…';
     try{
       const file = pastedImage || $('#aiFile').files[0];
@@ -652,6 +671,181 @@ function renderPlayer(pin, playerId){
 async function renderPractice(quiz){ let i=0, score=0, qStart=Date.now(); const step=()=>{ qStart=Date.now(); if(i>=quiz.questions.length){ app.innerHTML=`<div class="card center"><h1>🏁 Hoàn thành!</h1><p class="big">Điểm của em: ${score}</p><button class="btn" onclick="location.reload()">Về trang chủ</button></div>`; return; }
   const q=quiz.questions[i]; app.innerHTML=`<div class="card"><p class="badge">Câu ${i+1}/${quiz.questions.length}</p><h2>${richHtml(q.text)}</h2>${mediaHtml(q)}<div class="answers">${(q.type==='tf'?['Đúng','Sai']:q.answers).map((a,j)=>`<button class="ans ${COLORS[j]}" data-a="${j}"><span class="shape">${SHAPES[j]}</span>${richHtml(a)}</button>`).join('')}</div></div>`; math(app);
   app.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const elapsed=Date.now()-qStart; if(+b.dataset.a===q.correct){ const pts=Math.round((q.points||1000)*(1-Math.min(elapsed/((q.time||20)*1000),1)/2)); score+=pts; alert('🎉 Đúng rồi! +'+pts+' điểm (tính theo tốc độ trả lời)'); } else alert('Chưa đúng. Đáp án đúng là: '+q.answers[q.correct]); i++; step(); }); }; step(); }
+
+// ---------- Cuộc thi (phòng thi có khung giờ, mật mã, giới hạn số lần làm) ----------
+
+const dtLocal = ms => { const d=new Date(ms - new Date().getTimezoneOffset()*60000); return d.toISOString().slice(0,16); };
+async function contestCreate(data){
+  const code = String(Math.floor(100000+Math.random()*900000));
+  if (DEMO){ localStorage.setItem('eq_contest_'+code, JSON.stringify({code,...data})); return code; }
+  await F.setDoc(F.doc(db,'contests',code), {code,...data}); return code;
+}
+async function contestGet(code){
+  if (DEMO){ const r=localStorage.getItem('eq_contest_'+String(code).trim()); return r?JSON.parse(r):null; }
+  const d = await F.getDoc(F.doc(db,'contests',String(code).trim())); return d.exists() ? {code:d.id,...d.data()} : null;
+}
+async function contestList(){
+  if (DEMO){ const out=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k?.startsWith('eq_contest_')) out.push(JSON.parse(localStorage.getItem(k))); } return out.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)); }
+  const sn = await F.getDocs(F.collection(db,'contests')); return sn.docs.map(d=>({code:d.id,...d.data()})).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+}
+async function contestDelete(code){
+  if (DEMO){ localStorage.removeItem('eq_contest_'+code); localStorage.removeItem('eq_results_'+code); return; }
+  const rs = await F.getDocs(F.collection(db,'contests',code,'results'));
+  for (const d of rs.docs) await F.deleteDoc(d.ref);
+  await F.deleteDoc(F.doc(db,'contests',code));
+}
+async function contestSubmitResult(code, res){
+  if (DEMO){ const arr=JSON.parse(localStorage.getItem('eq_results_'+code)||'[]'); arr.push(res); localStorage.setItem('eq_results_'+code, JSON.stringify(arr)); return; }
+  await F.addDoc(F.collection(db,'contests',code,'results'), res);
+}
+async function contestResults(code){
+  if (DEMO) return JSON.parse(localStorage.getItem('eq_results_'+code)||'[]');
+  const sn = await F.getDocs(F.collection(db,'contests',code,'results')); return sn.docs.map(d=>({id:d.id,...d.data()}));
+}
+
+// Màn hình giáo viên: tạo + quản lý cuộc thi
+async function renderContests(){
+  const quizzes = (await store.listQuizzes()).filter(q=>me?.role==='admin'||!q.ownerUid||q.ownerUid===me?.uid);
+  const classes = (await store.listClasses()).filter(c=>me?.role==='admin'||c.ownerUid===me?.uid);
+  const mine = (await contestList()).filter(c=>me?.role==='admin'||c.ownerUid===me?.uid);
+  const now = Date.now();
+  const statusOf = c => now < c.startAt ? '<b style="color:#e69138">Chưa mở</b>' : now > c.endAt ? '<b style="color:#c00">Đã đóng</b>' : '<b style="color:#26890c">Đang mở</b>';
+  app.innerHTML = `<div class="card"><h1>🏆 Tạo cuộc thi</h1>
+  <label class="small"><b>Chọn bộ đề</b></label>
+  <select id="ctQuiz">${quizzes.map(q=>`<option value="${q.id}">${esc(q.title)} (${q.questions.length} câu)</option>`).join('')||'<option value="">— Chưa có bộ đề nào —</option>'}</select>
+  <label class="small"><b>Chọn lớp</b> (không bắt buộc)</label>
+  <select id="ctClass"><option value="">— Không chọn lớp —</option>${classes.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+  <div class="row"><label class="small grow">Thi từ ngày giờ <input id="ctStart" type="datetime-local" value="${dtLocal(now)}"></label>
+  <label class="small grow">Đến ngày giờ <input id="ctEnd" type="datetime-local" value="${dtLocal(now+2*3600*1000)}"></label></div>
+  <div class="row"><label class="small grow">Mật mã phòng thi (không bắt buộc) <input id="ctPass" placeholder="Để trống nếu không đặt mật mã"></label>
+  <label class="small">Số lần làm lại tối đa <input id="ctAttempts" type="number" value="1" min="1" max="10" style="width:90px"></label></div>
+  <label class="small" style="display:block"><input type="checkbox" id="ctAnti" checked style="width:auto"> ⚠️ Bật chống gian lận (rời màn hình khi đang làm: điểm câu đó còn 50%, ghi số lần vào thống kê)</label>
+  <button class="btn green" id="ctCreate">🏆 Tạo cuộc thi</button> <span id="ctMsg" class="small"></span>
+  <p class="small">Học sinh vào bằng <b>mã phòng thi 6 số</b> ở thẻ “Vào phòng thi” tại Trang chủ. Ngoài khung giờ trên, học sinh không vào được phòng thi.</p></div>
+  <div class="card"><h2>Cuộc thi của tôi (${mine.length})</h2>
+  ${mine.length? mine.map(c=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(c.title)}</b> ${statusOf(c)}<br><span class="small">Mã phòng thi: <b style="font-size:18px">${esc(c.code)}</b> • ${esc(c.className||'Không chọn lớp')} • ${c.questions?.length||0} câu • Tối đa ${c.maxAttempts||1} lần làm<br>Từ ${fmtDT(c.startAt)} đến ${fmtDT(c.endAt)}${c.password?' • Có mật mã':''}</span></div>
+  <button class="btn" data-stats="${c.code}">📊 Thống kê</button><button class="btn red" data-delct="${c.code}">Xóa</button></div></div>`).join('') : '<p class="small">Chưa có cuộc thi nào.</p>'}</div>`;
+  $('#ctCreate').onclick = async()=>{
+    const quiz = quizzes.find(q=>q.id===$('#ctQuiz').value); if(!quiz) return alert('Thầy/cô chưa có bộ đề nào. Tạo bộ đề trước nhé!');
+    const startAt = new Date($('#ctStart').value).getTime(), endAt = new Date($('#ctEnd').value).getTime();
+    if(!startAt||!endAt||endAt<=startAt) return alert('Khung giờ thi chưa hợp lệ: giờ kết thúc phải sau giờ bắt đầu.');
+    const cls = classes.find(c=>c.id===$('#ctClass').value);
+    const code = await contestCreate({ quizId: quiz.id, title: quiz.title, subject: quiz.subject||'', questions: quiz.questions,
+      classId: cls?.id||'', className: cls?.name||'', startAt, endAt, password: $('#ctPass').value.trim(),
+      maxAttempts: Math.max(1,Math.min(10,+$('#ctAttempts').value||1)), antiCheat: $('#ctAnti').checked,
+      ownerUid: me?.uid||'', ownerEmail: me?.email||'', createdAt: Date.now() });
+    alert('Đã tạo cuộc thi! Mã phòng thi: '+code+'\nThầy/cô gửi mã này cho học sinh để vào thi trong khung giờ đã đặt.');
+    renderContests();
+  };
+  app.querySelectorAll('[data-stats]').forEach(b=>b.onclick=()=>renderContestStats(b.dataset.stats));
+  app.querySelectorAll('[data-delct]').forEach(b=>b.onclick=async()=>{ if(confirm('Xóa cuộc thi này và toàn bộ kết quả của học sinh?')){ await contestDelete(b.dataset.delct); renderContests(); } });
+}
+
+// Cổng vào phòng thi cho học sinh
+async function renderContestGate(code, nickname){
+  const ct = await contestGet(code);
+  if (!ct){ alert('Không tìm thấy phòng thi này. Em kiểm tra lại mã phòng thi nhé!'); return; }
+  const now = Date.now(), open = now>=ct.startAt && now<=ct.endAt;
+  app.innerHTML = `<div class="card join"><h1>🏆 ${esc(ct.title)}</h1>
+  <p class="small">${ct.className?`Lớp: <b>${esc(ct.className)}</b> • `:''}${ct.questions.length} câu hỏi • Mỗi em được làm tối đa <b>${ct.maxAttempts||1} lần</b><br>Khung giờ thi: từ <b>${fmtDT(ct.startAt)}</b> đến <b>${fmtDT(ct.endAt)}</b></p>
+  ${open? `<input id="gNick" placeholder="Họ tên của em" value="${esc(nickname||'')}">
+  ${ct.password?'<input id="gPass" type="password" placeholder="Mật mã phòng thi">':''}
+  <button class="btn green" style="width:100%" id="gStart">Bắt đầu làm bài →</button>
+  <p class="small">Trả lời xong mỗi câu, hệ thống tự chuyển sang câu tiếp theo. ${ct.antiCheat?'Lưu ý: rời khỏi màn hình khi đang làm bài sẽ bị trừ 50% điểm câu đó và ghi vào thống kê.':''}</p>`
+  : `<div class="notice">${now<ct.startAt?'⏰ Chưa đến giờ thi. Em quay lại trong khung giờ ở trên nhé!':'⛔ Đã hết thời gian thi, phòng thi đã đóng.'}</div>
+  <button class="btn" style="width:100%" onclick="location.reload()">← Về trang chủ</button>`}</div>`;
+  if (!open) return;
+  $('#gStart').onclick = async()=>{
+    const nick = $('#gNick').value.trim(); if(!nick) return alert('Em nhập họ tên trước nhé!');
+    if (ct.password && $('#gPass').value.trim() !== ct.password) return alert('Mật mã phòng thi chưa đúng. Em hỏi lại thầy/cô nhé!');
+    const nameKey = nick.toLowerCase();
+    const done = (await contestResults(ct.code)).filter(r=>r.nameKey===nameKey).length;
+    const localDone = +(localStorage.getItem('eq_ctatt_'+ct.code+'_'+nameKey)||0);
+    const used = Math.max(done, localDone);
+    if (used >= (ct.maxAttempts||1)) return alert('Em đã hết số lần làm bài cho phép ('+(ct.maxAttempts||1)+' lần). Em liên hệ thầy/cô nếu cần làm lại nhé!');
+    localStorage.setItem('eq_ctatt_'+ct.code+'_'+nameKey, used+1);
+    renderContestPlay(ct, nick, used);
+  };
+}
+
+// Học sinh làm bài thi: tự chuyển câu, tính điểm theo tốc độ, chống gian lận
+function renderContestPlay(ct, nickname, attemptsBefore){
+  stopListen();
+  const qs = ct.questions, nameKey = nickname.trim().toLowerCase(), startedAt = Date.now();
+  let i=0, score=0, correctCount=0, cheatCount=0, finished=false, locked=false, cheated=false, qStart=0, timerInt=null;
+  const answers = [];
+  const onVis = ()=>{ if (document.hidden) markCheat(); };
+  const onBlur = ()=>markCheat();
+  document.addEventListener('visibilitychange', onVis); window.addEventListener('blur', onBlur);
+  function cleanup(){ clearInterval(timerInt); document.removeEventListener('visibilitychange', onVis); window.removeEventListener('blur', onBlur); }
+  function markCheat(){
+    if (finished || locked || ct.antiCheat===false || cheated) return;
+    cheated = true; cheatCount++;
+    const w = $('#ctWarn'); if (w) w.style.display='block';
+  }
+  async function finish(){
+    if (finished) return; finished = true; cleanup();
+    const res = { name: nickname, nameKey, className: ct.className||'', score, correctCount, total: qs.length, cheatCount, attempt: (attemptsBefore||0)+1, startedAt, finishedAt: Date.now(), answers };
+    await contestSubmitResult(ct.code, res);
+    const all = await contestResults(ct.code);
+    const ranked = [...all].sort((a,b)=>(b.score-a.score)||(a.finishedAt-b.finishedAt));
+    const rank = ranked.findIndex(r=>r.nameKey===nameKey && r.finishedAt===res.finishedAt)+1;
+    app.innerHTML = `<div class="card center"><h1>🏁 Đã nộp bài!</h1>
+    <p class="big">Điểm của em: ${score}</p>
+    <p>Số câu đúng: <b>${correctCount}/${qs.length}</b> • Xếp hạng hiện tại: <b>${rank>0?('thứ '+rank+' / '+ranked.length):'—'}</b>${ct.antiCheat?`<br>Số lần rời màn hình: <b>${cheatCount}</b>`:''}</p>
+    <div class="row" style="justify-content:center">${(attemptsBefore||0)+1 < (ct.maxAttempts||1) ? '<button class="btn" id="ctRetry">↻ Làm lại bài thi</button>' : ''}<button class="btn green" onclick="location.reload()">Về trang chủ</button></div></div>`;
+    const rt = $('#ctRetry'); if (rt) rt.onclick = ()=>{ localStorage.setItem('eq_ctatt_'+ct.code+'_'+nameKey, (attemptsBefore||0)+2 > (ct.maxAttempts||1) ? (ct.maxAttempts||1) : (attemptsBefore||0)+2); renderContestPlay(ct, nickname, (attemptsBefore||0)+1); };
+  }
+  function answer(choice){
+    if (locked || finished) return; locked = true; clearInterval(timerInt);
+    const q = qs[i], elapsed = Date.now()-qStart, correct = choice===q.correct;
+    let pts = correct ? Math.round((q.points||1000)*(1-Math.min(elapsed/((q.time||20)*1000),1)/2)) : 0;
+    if (correct && cheated && ct.antiCheat!==false) pts = Math.round(pts*0.5);
+    score += pts; if (correct) correctCount++;
+    answers.push({choice, correct, points: pts, cheated});
+    app.querySelectorAll('[data-ca]').forEach(b=>{ b.disabled = true; const j=+b.dataset.ca;
+      if (j===q.correct) b.style.background='#26890c';
+      else if (j===choice) b.style.background='#c00'; b.style.color='#fff'; });
+    const fb = $('#ctFb'); if (fb) fb.innerHTML = correct ? `🎉 Đúng rồi! +${pts} điểm${cheated&&ct.antiCheat!==false?' (đã giảm 50% vì rời màn hình)':''}` : (choice<0 ? '⏰ Hết giờ câu này!' : 'Chưa đúng rồi. Đáp án đúng đã được tô xanh.');
+    setTimeout(()=>{ i++; if (i>=qs.length || Date.now()>ct.endAt) finish(); else drawQ(); }, 1000);
+  }
+  function drawQ(){
+    cheated = false; locked = false; qStart = Date.now();
+    const q = qs[i], total = q.time||20, list = q.type==='tf' ? ['Đúng','Sai'] : q.answers;
+    app.innerHTML = `<div class="card"><div class="row"><span class="tag">Câu ${i+1}/${qs.length}</span><span class="tag">Điểm: ${score}</span><span class="tag" id="ctLeft">⏱️ ${total} giây</span></div>
+    <div style="background:#eee;border-radius:99px;height:10px;margin:8px 0"><div id="ctBar" style="background:#46178f;height:10px;border-radius:99px;width:100%"></div></div>
+    <div class="notice" id="ctWarn" style="display:none">⚠️ <b>Cảnh báo gian lận:</b> Em đã rời khỏi màn hình làm bài. Điểm câu này chỉ còn <b>50%</b> và lần rời màn hình sẽ hiện trong thống kê của thầy/cô.</div>
+    <h2>${richHtml(q.text)}</h2>${mediaHtml(q)}
+    <div class="answers">${list.map((a,j)=>`<button class="ans c${j}" data-ca="${j}">${SHAPES[j]} ${richHtml(a)}</button>`).join('')}</div>
+    <p class="small" id="ctFb" style="min-height:22px"></p></div>`;
+    math(app);
+    app.querySelectorAll('[data-ca]').forEach(b=>b.onclick=()=>answer(+b.dataset.ca));
+    clearInterval(timerInt);
+    timerInt = setInterval(()=>{ const left = total - Math.floor((Date.now()-qStart)/1000);
+      const el = $('#ctLeft'), bar = $('#ctBar'); if (!el){ clearInterval(timerInt); return; }
+      el.textContent = '⏱️ '+Math.max(0,left)+' giây'; if (bar) bar.style.width = Math.max(0,left/total*100)+'%';
+      if (Date.now() > ct.endAt){ finish(); return; }
+      if (left<=0) answer(-1);
+    }, 250);
+  }
+  drawQ();
+}
+
+// Thống kê cuộc thi cho giáo viên: tự xếp hạng theo điểm, sắp xếp mọi cột
+async function renderContestStats(code){
+  const ct = await contestGet(code); if(!ct){ alert('Không tìm thấy cuộc thi.'); return; }
+  const rs = await contestResults(code);
+  const ranked = [...rs].sort((a,b)=>(b.score-a.score)||(a.finishedAt-b.finishedAt));
+  const rankOf = r => ranked.indexOf(r)+1;
+  app.innerHTML = `<div class="card"><h1>📊 Thống kê cuộc thi</h1>
+  <p><b>${esc(ct.title)}</b> • Mã phòng thi <b>${esc(ct.code)}</b>${ct.className?` • Lớp ${esc(ct.className)}`:''}<br><span class="small">Khung giờ: ${fmtDT(ct.startAt)} → ${fmtDT(ct.endAt)} • Đã có ${rs.length} lượt làm bài • Bảng tự xếp hạng theo điểm từ cao xuống thấp, bấm ↕ ở từng cột để sắp xếp lại.</span></p>
+  <table class="sortable"><tr><th>Hạng</th><th>Học sinh</th><th>Ngày giờ làm</th><th>Điểm</th><th>Số câu đúng</th><th>⚠️ Số lần gian lận</th><th>Lần làm thứ</th></tr>
+  ${ranked.map(r=>`<tr><td data-sort="${rankOf(r)}">${rankOf(r)}</td><td>${esc(r.name)}</td><td data-sort="${r.finishedAt||0}">${fmtDT(r.finishedAt)}</td><td data-sort="${r.score||0}"><b>${r.score||0}</b></td><td data-sort="${r.correctCount||0}">${r.correctCount||0}/${r.total||0}</td><td data-sort="${r.cheatCount||0}">${r.cheatCount||0}</td><td data-sort="${r.attempt||1}">${r.attempt||1}</td></tr>`).join('')||'<tr><td colspan="7">Chưa có học sinh nào làm bài.</td></tr>'}
+  </table>
+  <button class="btn" onclick="document.querySelector('[data-nav=contests]').click()">← Quay lại danh sách cuộc thi</button></div>`;
+  enableSorting(app);
+}
+
 async function renderReports(){
   const qs=(await store.listQuizzes()).filter(q=>me?.role==='admin'||!q.ownerUid||q.ownerUid===me?.uid);
   const sessions=(await listSessionsData()).filter(x=>me?.role==='admin'||!x.hostUid||x.hostUid===me?.uid).slice(0,10);
