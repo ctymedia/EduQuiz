@@ -400,41 +400,69 @@ async function poolKeys(){
   return s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>((order[a.status]??0)-(order[b.status]??0)) || ((a.lastUsedAt||0)-(b.lastUsedAt||0)));
 }
 async function markKey(id, patch){ if(!DEMO) await F.updateDoc(F.doc(db,'apiKeys',id), patch); }
-const GEMINI_MODELS = ['gemini-3.8-flash','gemini-3.5-flash','gemini-2.5-flash','gemini-2.0-flash'];
+// Danh sach model DA KIEM CHUNG TRUC TIEP ngay 18/11/2026 bang key trong kho:
+// - gemini-3.5-flash-lite, gemini-3.1-flash-lite, gemini-flash-lite-latest: tra loi 1-3 giay, JSON dung.
+// - gemini-3-flash-preview: chay duoc nhung cham hon (~10 giay), de lam du phong cuoi.
+// KHONG dung lai cac model cu: gemini-3.8-flash va gemini-flash-latest treo qua 30 giay khong tra loi,
+// gemini-3.5-flash/3.6-flash bao 503 qua tai, gemini-2.5-flash/2.0-flash da bi Google ngung (404).
+const GEMINI_MODELS = ['gemini-3.5-flash-lite','gemini-3.1-flash-lite','gemini-flash-lite-latest','gemini-3-flash-preview'];
+const AI_ATTEMPT_TIMEOUT_MS = 20000; // Moi lan goi model toi da 20 giay, qua la tu ngat va chuyen model khac
+const AI_TOTAL_TIMEOUT_MS = 90000;   // Toan bo lan tao de toi da 90 giay, khong bao gio treo vo han
 const isModelError = e => e?.status===404 || /model[^.]*?(not found|no longer available|not supported)|is not found for API version/i.test(e?.message||'');
 const isTransientError = e => e?.status===503 || e?.status===500 || /high demand|overloaded|UNAVAILABLE|temporarily|try again later/i.test(e?.message||'');
 const isNetworkError = e => e?.name==='TypeError' || /failed to fetch|networkerror|load failed|network request failed/i.test(e?.message||'');
 const NETWORK_MSG = 'Không kết nối được tới máy chủ Google AI (Failed to fetch). Đây là lỗi kết nối mạng hoặc trình duyệt chặn, KHÔNG phải lỗi API key. Cách xử lý: 1) Kiểm tra lại kết nối mạng. 2) Nếu đang dùng trình duyệt Brave: bấm biểu tượng con sư tử ở thanh địa chỉ và hạ Shields xuống (Shields Down) cho trang này; tắt app chặn quảng cáo/VPN nếu có. 3) Hoặc mở trang bằng Chrome rồi thử lại.';
 const sleepMs = ms => new Promise(r=>setTimeout(r,ms));
-async function callGemini(parts, key){
-  let lastErr = null, sawTransient = false, sawNetwork = false;
-  for (let round=0; round<2; round++){
-    for (const model of GEMINI_MODELS){
-      try{
-        const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent?key='+encodeURIComponent(key), {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ contents:[{parts}], generationConfig:{ responseMimeType:'application/json', temperature:0.7 } }) });
-        const j = await r.json().catch(()=>({}));
-        if (!r.ok){ const err=new Error(j?.error?.message||('HTTP '+r.status)); err.status=r.status; throw err; }
-        return j?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'';
-      }catch(e){ lastErr=e; if (isModelError(e)) continue; if (isNetworkError(e)){ sawNetwork=true; continue; } if (isTransientError(e)){ sawTransient=true; continue; } throw e; }
-    }
-    if (round===0 && (sawTransient || sawNetwork)) await sleepMs(3000); // Qua tai hoac mang chop: nghi 3 giay roi thu lai tu dau
+async function callGemini(parts, key, ctl={}){
+  let lastErr = null, sawTransient = false, sawNetwork = false, sawTimeout = false;
+  const deadline = ctl.deadline || (Date.now() + AI_TOTAL_TIMEOUT_MS);
+  for (const model of GEMINI_MODELS){
+    if (ctl.signal?.aborted){ const err=new Error('Đã huỷ tạo câu hỏi.'); err.cancelled=true; throw err; }
+    const remain = deadline - Date.now();
+    if (remain <= 0){ sawTimeout = true; break; }
+    // Moi lan goi co dong ho ngat rieng: model treo qua thoi gian nay thi bo qua ngay, khong de ca trang dung yen
+    const ac = new AbortController();
+    const timer = setTimeout(()=>ac.abort(), Math.min(AI_ATTEMPT_TIMEOUT_MS, remain));
+    const onParentAbort = ()=>ac.abort();
+    if (ctl.signal){ if (ctl.signal.aborted) ac.abort(); else ctl.signal.addEventListener('abort', onParentAbort, {once:true}); }
+    try{
+      ctl.onProgress?.(model);
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent?key='+encodeURIComponent(key), {
+        method:'POST', headers:{'Content-Type':'application/json'}, signal: ac.signal,
+        body: JSON.stringify({ contents:[{parts}], generationConfig:{ responseMimeType:'application/json', temperature:0.7 } }) });
+      const j = await r.json().catch(()=>({}));
+      if (!r.ok){ const err=new Error(j?.error?.message||('HTTP '+r.status)); err.status=r.status; throw err; }
+      const text = j?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'';
+      if (!text){ const err=new Error('Model '+model+' trả về rỗng'+(j?.candidates?.[0]?.finishReason?(' ('+j.candidates[0].finishReason+')'):'')); err.modelError=true; throw err; }
+      return text;
+    }catch(e){
+      lastErr = e;
+      if (ctl.signal?.aborted){ const err=new Error('Đã huỷ tạo câu hỏi.'); err.cancelled=true; throw err; }
+      if (e?.name==='AbortError'){ sawTimeout=true; continue; } // Het 20 giay ma model chua tra loi -> chuyen model khac ngay
+      if (isModelError(e)) continue;
+      if (isNetworkError(e)){ sawNetwork=true; continue; }
+      if (isTransientError(e)){ sawTransient=true; continue; }
+      throw e;
+    }finally{ clearTimeout(timer); if (ctl.signal) ctl.signal.removeEventListener?.('abort', onParentAbort); }
   }
   if (sawNetwork){ const err=new Error(NETWORK_MSG); err.network=true; throw err; }
+  if (sawTimeout && !sawTransient){ const err=new Error('Model AI phản hồi quá chậm (quá '+Math.round(AI_ATTEMPT_TIMEOUT_MS/1000)+' giây mỗi lần thử và quá thời gian chờ tối đa). Đây là lỗi phía máy chủ Google, không phải lỗi API key. Thầy/cô bấm tạo lại, hoặc chờ khoảng 1 phút rồi thử lại nhé.'); err.timeout=true; err.transient=true; throw err; }
   if (sawTransient){ const err=new Error('Máy chủ AI của Google đang quá tải do nhu cầu cao (lỗi tạm thời phía Google, không phải lỗi API key). Thầy/cô chờ khoảng 1 phút rồi bấm tạo lại nhé.'); err.transient=true; throw err; }
   const err = new Error('Không có model Gemini nào khả dụng lúc này. Lỗi cuối: '+(lastErr?.message||'')); err.modelError = true; err.status = lastErr?.status; throw err;
 }
 
-async function generateWithRotation(parts, ownKey){
+async function generateWithRotation(parts, ownKey, ctl={}){
+  if (!ctl.deadline) ctl.deadline = Date.now() + AI_TOTAL_TIMEOUT_MS;
   const candidates = [];
   if (ownKey){ const id = await addKeyToPool(ownKey, me?.email); candidates.push({id, key:ownKey, own:true}); }
   if (can('systemKeys') || me?.role==='admin'){ (await poolKeys()).forEach(k=>{ if(!candidates.some(c=>c.key===k.key)) candidates.push({id:k.id, key:k.key}); }); }
   if (!candidates.length) throw new Error('Chưa có API key khả dụng. Thầy/cô nhập API key Gemini của mình, hoặc nhờ admin cấp quyền “Dùng API key hệ thống”.');
   let lastErr = null;
   for (const c of candidates){
-    try{ const text = await callGemini(parts, c.key); if (c.id) await markKey(c.id, { status:'ready', lastUsedAt: Date.now(), lastError:'' }); return text; }
+    try{ const text = await callGemini(parts, c.key, ctl); if (c.id) await markKey(c.id, { status:'ready', lastUsedAt: Date.now(), lastError:'' }); return text; }
     catch(e){ lastErr = e;
+      if (e.cancelled) throw e;
+      if (e.timeout) throw e;
       if (e.network || isNetworkError(e)){ const ne = new Error(NETWORK_MSG); ne.network = true; throw ne; }
       if (e.transient || isTransientError(e)){ const te = new Error('Máy chủ AI của Google đang quá tải do nhu cầu cao (lỗi tạm thời phía Google, không phải lỗi API key). Thầy/cô chờ khoảng 1 phút rồi bấm tạo lại nhé.'); te.transient = true; throw te; }
       if (e.modelError || isModelError(e)) throw e; // Loi model la loi cua he thong, khong phai loi cua key -> khong danh dau key, khong thu key khac
@@ -476,7 +504,7 @@ function renderAI(){
   <input id="aiKey" type="password" placeholder="AIza..." autocomplete="off">
   <div class="row"><a class="btn light" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">🔑 Tới trang lấy API key miễn phí</a><button class="btn" id="saveKey" type="button">💾 Lưu API key</button><span class="small" id="saveKeyMsg"></span></div>
   <p class="small">Key sẽ được lưu vào kho key chung của hệ thống để dùng chung; lần sau thầy/cô không cần nhập lại.</p>
-  <button class="btn green" id="doAI">✨ Tạo câu hỏi bằng AI</button> <span id="aiStatus" class="small"></span>
+  <button class="btn green" id="doAI">✨ Tạo câu hỏi bằng AI</button> <button class="btn red" id="aiCancel" type="button" style="display:none">⏹ Huỷ tạo</button> <span id="aiStatus" class="small"></span>
   <div id="aiResult" style="margin-top:14px"></div></div>`;
   let pastedImage = null;
   const savedKey = localStorage.getItem('eq_my_key')||''; if (savedKey && !$('#aiKey').value) $('#aiKey').value = savedKey;
@@ -486,8 +514,16 @@ function renderAI(){
   $('#aiPaste').addEventListener('paste', e=>{ const item=[...(e.clipboardData?.items||[])].find(x=>x.type.startsWith('image/')); if(item){ e.preventDefault(); pastedImage=item.getAsFile(); $('#aiPastePrev').innerHTML='<p class="small">Đã nhận ảnh dán vào ✔</p>'; } });
   $('#doAI').onclick=async()=>{
     const topic=$('#aiTopic').value.trim(); if(!topic) return alert('Thầy/cô nhập chủ đề trước nhé!');
+    if ($('#doAI').disabled) return;
     const count=Math.max(1,Math.min(40,+$('#aiCount').value||10)), ownKey=($('#aiKey').value.trim()||localStorage.getItem('eq_my_key')||''); if($('#aiKey').value.trim()) localStorage.setItem('eq_my_key',$('#aiKey').value.trim());
-    $('#aiStatus').textContent='Đang tạo câu hỏi, thầy/cô chờ một chút…';
+    // Chong treo: co dong ho dem giay, bao dang thu model nao, nut Huy, va thoi han toi da — khong de trang dung yen vo han
+    const ac = new AbortController();
+    const ctl = { signal: ac.signal, deadline: Date.now() + AI_TOTAL_TIMEOUT_MS, model: '' };
+    ctl.onProgress = m => { ctl.model = m; };
+    const startedAt = Date.now();
+    const drawStatus = ()=>{ const s = Math.floor((Date.now()-startedAt)/1000); $('#aiStatus').textContent = 'Đang tạo câu hỏi, thầy/cô chờ một chút… ('+s+' giây'+(ctl.model?', đang thử model '+ctl.model:'')+')'; };
+    drawStatus(); const statusTimer = setInterval(drawStatus, 1000);
+    $('#doAI').disabled = true; $('#aiCancel').style.display = ''; $('#aiCancel').onclick = ()=>ac.abort();
     try{
       const file = pastedImage || $('#aiFile').files[0];
       const extra = await extractFileForAI(file);
@@ -496,7 +532,7 @@ Mỗi câu có đúng 1 đáp án đúng. Được dùng công thức dạng $..
 Chỉ trả về JSON thuần (không markdown) dạng: {"questions":[{"text":"...","answers":["...","...","...","..."],"correct":0}]}
 correct là vị trí đáp án đúng từ 0 đến 3, hãy xáo trộn vị trí đáp án đúng giữa các câu.`;
       const parts=[{text:prompt}, ...extra.parts];
-      const raw = await generateWithRotation(parts, ownKey);
+      const raw = await generateWithRotation(parts, ownKey, ctl);
       const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
       const qs = (parsed.questions||[]).map(q=>({ text:String(q.text||''), type:'quiz', answers:(q.answers||[]).slice(0,4).map(String), correct:Math.min(3,Math.max(0,+q.correct||0)), time:+$('#aiTime').value, points:1000, media:null })).filter(q=>q.text&&q.answers.length===4);
       if(!qs.length) throw new Error('AI trả về không đúng định dạng. Thầy/cô thử lại nhé!');
@@ -506,7 +542,8 @@ correct là vị trí đáp án đúng từ 0 đến 3, hãy xáo trộn vị tr
       $('#aiSave').onclick=async()=>{ const chk=await checkQuizLimits(qs.length); if(chk!==true) return alert(chk);
         await store.createQuiz({title:topic,subject:'Tạo bằng AI',questions:qs,ownerUid:me.uid,ownerEmail:me.email}); alert('Đã lưu vào thư viện!'); renderLibrary(); };
       $('#aiEdit').onclick=()=>renderCreate(qs, topic, 'Tạo bằng AI');
-    }catch(e){ $('#aiStatus').textContent=''; alert('Tạo đề chưa được: '+e.message); }
+    }catch(e){ if (e?.cancelled || ac.signal.aborted){ $('#aiStatus').textContent='Đã huỷ tạo câu hỏi.'; } else { $('#aiStatus').textContent=''; alert('Tạo đề chưa được: '+e.message); } }
+    finally{ clearInterval(statusTimer); $('#doAI').disabled = false; $('#aiCancel').style.display = 'none'; }
   };
 }
 
