@@ -111,13 +111,14 @@ function checkAccess(p){
 
 // ---------- Khởi tạo ----------
 async function init(){
-  if (DEMO){ $('#syncStatus').textContent='⚠️ Chế độ demo (chưa nối Firebase)'; me={uid:'demo',email:'demo@eduquiz.local',displayName:'Giáo viên demo',role:'admin',status:'approved',plan:'ultra',features:defaultFeatures(),expiresAt:null}; paintAuth(); renderHome(); if(!maybeDeepLink()) maybeResumeLive(); return; }
+  if (DEMO){ $('#syncStatus').textContent='⚠️ Chế độ demo (chưa nối Firebase)'; me={uid:'demo',email:'demo@eduquiz.local',displayName:'Giáo viên demo',role:'admin',status:'approved',plan:'ultra',features:defaultFeatures(),expiresAt:null}; initSettings(); paintAuth(); renderHome(); if(!maybeDeepLink()) maybeResumeLive(); return; }
   const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
   F = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
   A = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
   const fbApp = initializeApp(firebaseConfig); db = F.getFirestore(fbApp); auth = A.getAuth(fbApp);
   $('#syncStatus').textContent='☁️ Đã nối Firebase — đồng bộ mọi thiết bị';
   await loadPlans();
+  initSettings();
   A.onAuthStateChanged(auth, async user=>{
     if (!user){ me=null; paintAuth(); renderHome(); if(!maybeDeepLink()) maybeResumeLive(); return; }
     const snap = await F.getDoc(F.doc(db,'users',user.uid));
@@ -764,9 +765,10 @@ function renderAdmin(tab){
     <button class="btn ${tab==='members'?'':'light'}" data-tab="members">👥 Thành viên</button>
     <button class="btn ${tab==='keys'?'':'light'}" data-tab="keys">🔑 API key</button>
     <button class="btn ${tab==='plans'?'':'light'}" data-tab="plans">💎 Gói thành viên</button>
+    <button class="btn ${tab==='settings'?'':'light'}" data-tab="settings">⚙️ Cài đặt khác</button>
   </div><div id="tabBody" style="margin-top:14px"></div></div>`;
   app.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>renderAdmin(b.dataset.tab));
-  ({members:renderAdminMembers, keys:renderAdminKeys, plans:renderAdminPlans})[tab]($('#tabBody'));
+  ({members:renderAdminMembers, keys:renderAdminKeys, plans:renderAdminPlans, settings:renderAdminSettings})[tab]($('#tabBody'));
 }
 async function renderAdminDevices(uid){
   stopListen();
@@ -848,6 +850,35 @@ async function renderAdminKeys(box){
     try{ await navigator.clipboard.writeText(k.key); alert('Đã copy đầy đủ API key.'); }catch{ prompt('Copy API key này:', k.key); } });
   box.querySelectorAll('[data-delkey]').forEach(b=>b.onclick=async()=>{ if(confirm('Xoá API key này khỏi kho hệ thống?')){ await F.deleteDoc(F.doc(db,'apiKeys',b.dataset.delkey)); renderAdmin('keys'); } });
   box.querySelectorAll('[data-reset]').forEach(b=>b.onclick=async()=>{ await markKey(b.dataset.reset,{status:'ready',lastError:''}); renderAdmin('keys'); });
+}
+async function renderAdminSettings(box){
+  const st = window.__siteSettings||{};
+  const fx = st.effect||{};
+  let bgImg = st.bgImage||'';
+  const FXOPTS = [['none','Không có hiệu ứng'],['rain','🌧️ Mưa rơi'],['snow','❄️ Tuyết rơi'],['hearts','💗 Trái tim rơi'],['mai','🌼 Hoa mai (Tết)'],['dao','🌸 Hoa đào (Tết)'],['banhchung','🟩 Bánh chưng (Tết)'],['tree','🎄 Cây thông Noel'],['reindeer','🦌 Tuần lộc'],['santa','🎅 Ông già Noel']];
+  box.innerHTML = `<p class="small">Cài đặt chung cho toàn bộ trang — áp dụng ngay cho mọi người dùng, không cần tải lại trang.</p>
+  <div class="card" style="background:#fafafa"><h2>🏷️ Phiên bản</h2>
+  <label class="small">Số phiên bản hiển thị ở chân trang: <input id="stVersion" value="${esc(st.version||'1.0')}" style="width:160px" placeholder="Ví dụ: 1.0"></label></div>
+  <div class="card" style="background:#fafafa"><h2>🖼️ Hình nền trang</h2>
+  <input type="file" accept="image/*" id="stBgFile"><div id="stBgPrev">${bgImg?`<img src="${bgImg}" style="width:100%;max-height:160px;object-fit:cover;border-radius:10px">`:''}</div>
+  <button class="btn red" id="stBgDel" style="padding:6px 12px;font-size:13px">🗑️ Xóa hình nền trang</button></div>
+  <div class="card" style="background:#fafafa"><h2>✨ Hiệu ứng trang (theo mùa, ngày lễ)</h2>
+  <label class="small">Chọn hiệu ứng: <select id="stFxType" style="width:auto">${FXOPTS.map(([v,l])=>`<option value="${v}" ${(fx.type||'none')===v?'selected':''}>${l}</option>`).join('')}</select></label>
+  <div class="row"><label class="small">Mật độ: <b id="stFxDenVal">${fx.density??30}</b></label><input type="range" id="stFxDen" min="5" max="80" value="${fx.density??30}" class="grow" style="width:auto;margin:0"></div>
+  <div class="row"><label class="small">Tốc độ rơi: <b id="stFxSpdVal">${fx.speed??1}</b>x</label><input type="range" id="stFxSpd" min="0.3" max="2.5" step="0.1" value="${fx.speed??1}" class="grow" style="width:auto;margin:0"></div>
+  <div class="row"><label class="small">Kích cỡ hạt: <b id="stFxSizeVal">${fx.size??22}</b>px</label><input type="range" id="stFxSize" min="12" max="44" value="${fx.size??22}" class="grow" style="width:auto;margin:0"></div>
+  <p class="small">Mật độ là số hạt rơi trên màn hình cùng lúc. Hiệu ứng chỉ để ngắm, không che nút bấm (bấm xuyên qua được).</p></div>
+  <div class="card" style="background:#fafafa"><h2>🎨 CSS tuỳ chỉnh (nhúng vào thẻ &lt;head&gt;)</h2>
+  <p class="small">Dán mã CSS vào đây để tự tạo hiệu ứng trang riêng (đổi màu nền, viền thẻ, hoạt ảnh...). CSS được chèn vào thẻ &lt;head&gt; của trang và áp dụng cho mọi người dùng. Ví dụ: <code>.card{border:2px solid #f9a8d4}</code></p>
+  <textarea id="stCss" rows="7" style="font-family:Consolas,monospace;font-size:14px" placeholder="/* Dán CSS tuỳ chỉnh tại đây */">${esc(st.customCss||'')}</textarea></div>
+  <button class="btn green" id="stSave">💾 Lưu cài đặt</button> <span id="stMsg" class="small"></span>`;
+  const bf=$('#stBgFile'); if(bf) bf.onchange=async()=>{ const f=bf.files[0]; if(!f) return; bgImg=await compressImage(f); $('#stBgPrev').innerHTML=`<img src="${bgImg}" style="width:100%;max-height:160px;object-fit:cover;border-radius:10px">`; };
+  const bd=$('#stBgDel'); if(bd) bd.onclick=()=>{ bgImg=''; $('#stBgPrev').innerHTML=''; const f=$('#stBgFile'); if(f) f.value=''; };
+  const den=$('#stFxDen'); if(den) den.oninput=()=>{ $('#stFxDenVal').textContent=den.value; };
+  const spd=$('#stFxSpd'); if(spd) spd.oninput=()=>{ $('#stFxSpdVal').textContent=spd.value; };
+  const siz=$('#stFxSize'); if(siz) siz.oninput=()=>{ $('#stFxSizeVal').textContent=siz.value; };
+  $('#stSave').onclick=async()=>{ await saveSiteSettings({ version: $('#stVersion').value.trim()||'1.0', bgImage: bgImg, effect:{ type: $('#stFxType').value, density:+$('#stFxDen').value, speed:+$('#stFxSpd').value, size:+$('#stFxSize').value }, customCss: $('#stCss').value });
+    $('#stMsg').textContent='✔ Đã lưu — cài đặt đang được áp dụng cho mọi người dùng.'; };
 }
 async function renderAdminPlans(box){
   await loadPlans();
@@ -1215,5 +1246,47 @@ async function renderContestEdit(code){
 }
 const leaderboard=(ps,m)=>`<h2>🏆 Bảng xếp hạng</h2><table class="sortable"><tr><th>Hạng</th><th>Người chơi</th><th>Điểm</th></tr>${ps.slice(0,10).map((p,i)=>`<tr ${m&&p.id===m?'style="background:#fff3cd;font-weight:800"':''}><td data-sort="${i+1}">${i+1}</td><td>${p.avatar||'🙂'} ${esc(p.nickname)} ${p.streak>=3?'🔥':''}</td><td data-sort="${p.score||0}">${p.score||0} điểm</td></tr>`).join('')}</table>`;
 const podium=ps=>{ const t=[ps[1],ps[0],ps[2]].filter(Boolean); return `<h2>👑 Bục vinh quang</h2><div class="podium">${t.map(p=>`<div class="pod"><div style="font-size:28px">${p.avatar||'🙂'}</div><div>${esc(p.nickname)}</div><div class="bar">${p.score||0}đ</div></div>`).join('')}</div>`+leaderboard(ps); };
+
+// ---------- Cài đặt chung của trang (Quản trị → Cài đặt khác) ----------
+window.__siteSettings = {};
+function applyFx(){
+  const layer = document.getElementById('fxLayer'); if(!layer) return;
+  layer.innerHTML='';
+  const fx = (window.__siteSettings||{}).effect||{}; const type = fx.type||'none';
+  if (type==='none') return;
+  const n = Math.min(100, Math.max(1, +fx.density||30)), spd = +fx.speed||1, size = +fx.size||22;
+  const glyphs = { snow:['❄','❅','❆'], hearts:['❤️','💗','💖','💕'], mai:['🌼'], dao:['🌸'], tree:['🎄'], reindeer:['🦌'], santa:['🎅','🎄','🎁'] };
+  for (let i=0;i<n;i++){
+    const el = document.createElement('span'); el.className='fxp';
+    const dur = (type==='rain' ? (0.7+Math.random()*0.5) : (6+Math.random()*6)) / spd;
+    el.style.left = (Math.random()*100)+'vw';
+    el.style.animationDuration = dur+'s';
+    el.style.animationDelay = (-Math.random()*dur)+'s';
+    if (type==='rain'){ el.classList.add('fxrain'); }
+    else if (type==='banhchung'){ el.classList.add('fxbc'); el.style.width=size+'px'; el.style.height=size+'px'; }
+    else { const g = glyphs[type]||['❄']; el.textContent = g[Math.floor(Math.random()*g.length)]; el.style.fontSize = Math.round(size*(0.7+Math.random()*0.7))+'px'; }
+    layer.appendChild(el);
+  }
+}
+function applySettings(){
+  const st = window.__siteSettings||{};
+  const f = document.getElementById('siteFooterText');
+  if (f) f.textContent = `PCQuiz - Tổ chức cuộc thi trực tuyến - Version ${st.version||'1.0'}`;
+  if (st.bgImage){ document.body.style.backgroundImage = `linear-gradient(rgba(250,248,255,.88),rgba(250,248,255,.88)),url('${st.bgImage}')`; document.body.style.backgroundSize='cover'; document.body.style.backgroundAttachment='fixed'; document.body.style.backgroundPosition='center'; }
+  else document.body.style.backgroundImage='';
+  let cs = document.getElementById('customCssStyle');
+  if (st.customCss){ if(!cs){ cs=document.createElement('style'); cs.id='customCssStyle'; document.head.appendChild(cs); } cs.textContent = st.customCss; }
+  else if (cs) cs.textContent='';
+  applyFx();
+}
+async function saveSiteSettings(patch){
+  const cur = { ...(window.__siteSettings||{}), ...patch };
+  if (DEMO){ localStorage.setItem('eq_site_settings', JSON.stringify(cur)); window.__siteSettings = cur; applySettings(); return; }
+  await F.setDoc(F.doc(db,'plans','siteSettings'), cur, { merge:true });
+}
+function initSettings(){
+  if (DEMO){ try{ window.__siteSettings = JSON.parse(localStorage.getItem('eq_site_settings')||'{}'); }catch{ window.__siteSettings={}; } applySettings(); return; }
+  if (F && db) F.onSnapshot(F.doc(db,'plans','siteSettings'), sn=>{ window.__siteSettings = sn.exists()? sn.data() : {}; applySettings(); }, ()=>{});
+}
 
 init();
