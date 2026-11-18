@@ -130,7 +130,7 @@ async function init(){
       if (!fd.match && fd.count >= devLimit){ await A.signOut(auth); me=null; paintAuth(); alert(`Tài khoản này đã đăng nhập trên tối đa ${devLimit} thiết bị (giới hạn của gói ${myPlan().name}, mỗi thiết bị được nhận diện bằng một ID riêng). Thầy/cô hãy đăng xuất ở một thiết bị cũ, hoặc liên hệ admin để nâng giới hạn nhé.`); renderHome(); return; } }
     await F.updateDoc(F.doc(db,'users',user.uid), { lastLoginAt: Date.now() });
     await registerDevice(me.uid);
-    paintAuth(); renderHome(); if(!maybeDeepLink()) maybeResumeLive();
+    paintAuth(); if (me.forcePwChange){ renderChangePassword(true); return; } renderHome(); if(!maybeDeepLink()) maybeResumeLive();
   });
   renderHome();
 }
@@ -175,6 +175,29 @@ function renderContact(){
   <button class="btn light" id="contactBack">← Về trang chủ</button></div>`;
   $('#contactBack').onclick=()=>renderHome();
 }
+const myDeviceId = () => { let id=localStorage.getItem('eq_device_id'); if(!id){ id='dev'+Date.now()+Math.floor(Math.random()*99999); localStorage.setItem('eq_device_id',id); } return id; };
+function renderChangePassword(forced){
+  if(!me) return renderLogin();
+  stopListen();
+  app.innerHTML=`<div class="card join" style="max-width:460px"><h1>🔑 Đổi mật khẩu</h1>
+  ${forced?'<div class="notice">Admin đã reset mật khẩu cho tài khoản của thầy/cô. Vui lòng đặt mật khẩu mới (khác mật khẩu cũ) để tiếp tục sử dụng.</div>':''}
+  <input id="pwCur" type="password" placeholder="Mật khẩu hiện tại">
+  <input id="pwNew" type="password" placeholder="Mật khẩu mới (ít nhất 6 ký tự)">
+  <input id="pwNew2" type="password" placeholder="Nhập lại mật khẩu mới">
+  <button class="btn green" style="width:100%" id="pwSave">💾 Đổi mật khẩu</button>
+  ${forced?'':'<button class="btn light" style="width:100%;margin-top:8px" id="pwBack">← Quay lại</button>'}
+  <p class="small" id="pwMsg"></p></div>`;
+  const back=$('#pwBack'); if(back) back.onclick=()=>renderHome();
+  $('#pwSave').onclick=async()=>{ const cur=$('#pwCur').value, nw=$('#pwNew').value, nw2=$('#pwNew2').value;
+    if(!cur||nw.length<6) return alert('Thầy/cô nhập mật khẩu hiện tại và mật khẩu mới ít nhất 6 ký tự nhé!');
+    if(nw!==nw2) return alert('Mật khẩu mới nhập lại chưa khớp.');
+    if(nw===cur) return alert('Mật khẩu mới phải khác mật khẩu cũ.');
+    if(DEMO){ me.forcePwChange=false; alert('Đã đổi mật khẩu (bản demo).'); renderHome(); return; }
+    try{ const user=auth.currentUser; const cred=A.EmailAuthProvider.credential(user.email, cur); await A.reauthenticateWithCredential(user, cred); await A.updatePassword(user, nw);
+      if(me.forcePwChange){ await F.updateDoc(F.doc(db,'users',me.uid),{forcePwChange:false}); me.forcePwChange=false; }
+      alert('✔ Đổi mật khẩu thành công!'); renderHome();
+    }catch(e){ alert('Đổi mật khẩu chưa được: '+(['auth/wrong-password','auth/invalid-credential'].includes(e.code)?'Mật khẩu hiện tại chưa đúng.':e.message)); } };
+}
 function renderProfile(){
   if(!me) return renderLogin();
   if(!can('avatar')){ alert('Tài khoản của bạn chưa được cấp quyền đổi avatar. Vui lòng liên hệ admin để được cấp quyền.'); return; }
@@ -200,11 +223,12 @@ function renderProfile(){
 }
 function paintAuth(){ const el=$('#authArea'); if(!el) return; paintNav();
   const lg0=$('#logoHome'); if(lg0){ lg0.onclick=()=>{ if(me?.role==='admin'){ stopListen(); renderAdmin('members'); } }; lg0.style.cursor = me?.role==='admin' ? 'pointer' : 'default'; lg0.title = me?.role==='admin' ? 'Bấm để mở Quản trị' : ''; }
-  el.innerHTML = me ? `<span style="position:relative;display:inline-block;text-align:left"><span style="display:inline-flex;align-items:center;gap:7px"><span id="myAvatar" ${can('avatar')?'style="cursor:pointer" title="Bấm để đổi avatar"':''}>${avatarHtml(me,30)}</span><span id="myName" class="${nameClass(me)}" style="cursor:pointer" title="Bấm để xem thông tin tài khoản">${esc(me.displayName||me.email)} ▾</span></span><span id="userMenu" style="display:none;position:absolute;right:0;top:calc(100% + 10px);background:#fff;border:2px solid #e9d5ff;border-radius:12px;box-shadow:0 12px 32px #0003;padding:12px 14px;min-width:240px;z-index:3000"><span class="small" style="display:block">Gói thành viên: <b class="${nameClass(me)}">${esc(myPlan().name)}</b></span><span class="small" style="display:block;margin-top:4px">Hạn sử dụng: <b>${me.expiresAt?fmtDate(me.expiresAt):'Không giới hạn'}</b></span>${me.role==='admin'?'<span class="small" style="display:block;margin-top:4px">Vai trò: <b>👑 Admin</b></span>':''}<button id="menuContact" class="btn light" style="width:100%;margin-top:10px;padding:7px 10px;font-size:14px">📞 Liên hệ tác giả</button><button id="menuLogout" class="btn red" style="width:100%;margin-top:10px;padding:7px 10px;font-size:14px">🚪 Đăng xuất</button></span></span>`
+  el.innerHTML = me ? `<span style="position:relative;display:inline-block;text-align:left"><span style="display:inline-flex;align-items:center;gap:7px"><span id="myAvatar" ${can('avatar')?'style="cursor:pointer" title="Bấm để đổi avatar"':''}>${avatarHtml(me,30)}</span><span id="myName" class="${nameClass(me)}" style="cursor:pointer" title="Bấm để xem thông tin tài khoản">${esc(me.displayName||me.email)} ▾</span></span><span id="userMenu" style="display:none;position:absolute;right:0;top:calc(100% + 10px);background:#fff;border:2px solid #e9d5ff;border-radius:12px;box-shadow:0 12px 32px #0003;padding:12px 14px;min-width:240px;z-index:3000"><span class="small" style="display:block">Gói thành viên: <b class="${nameClass(me)}">${esc(myPlan().name)}</b></span><span class="small" style="display:block;margin-top:4px">Hạn sử dụng: <b>${me.expiresAt?fmtDate(me.expiresAt):'Không giới hạn'}</b></span>${me.role==='admin'?'<span class="small" style="display:block;margin-top:4px">Vai trò: <b>👑 Admin</b></span>':''}<button id="menuPw" class="btn light" style="width:100%;margin-top:10px;padding:7px 10px;font-size:14px">🔑 Đổi mật khẩu</button><button id="menuContact" class="btn light" style="width:100%;margin-top:10px;padding:7px 10px;font-size:14px">📞 Liên hệ tác giả</button><button id="menuLogout" class="btn red" style="width:100%;margin-top:10px;padding:7px 10px;font-size:14px">🚪 Đăng xuất</button></span></span>`
                     : `<button id="loginBtn">Đăng nhập</button> <button id="regBtn">Đăng ký</button>`;
   if (me){ $('#menuLogout').onclick=async()=>{ stopListen(); if(!DEMO) await A.signOut(auth); me=null; paintAuth(); renderHome(); };
     const avEl=$('#myAvatar'); if(avEl && can('avatar')) avEl.onclick=()=>renderProfile();
     const mc=$('#menuContact'); if(mc) mc.onclick=()=>{ const m=document.getElementById('userMenu'); if(m) m.style.display='none'; renderContact(); };
+    const mp=$('#menuPw'); if(mp) mp.onclick=()=>{ const m=document.getElementById('userMenu'); if(m) m.style.display='none'; renderChangePassword(false); };
     const nm=$('#myName'), um=$('#userMenu');
     if(nm&&um){ nm.onclick=e=>{ e.stopPropagation(); um.style.display = um.style.display==='none' ? 'block' : 'none'; };
       if(window.__umClose) document.removeEventListener('click', window.__umClose);
@@ -226,31 +250,48 @@ document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{ stopListen();
 
 // ---------- Đăng ký / Đăng nhập ----------
 function renderRegister(msg){
+  const stL = window.__siteSettings||{};
+  if (stL.regLock && !DEMO){ app.innerHTML=`<div class="card join"><h1>🔒 Đăng ký đang tạm khóa</h1><p class="small">Hệ thống hiện không mở đăng ký tài khoản mới. Thầy/cô vui lòng liên hệ tác giả để được hỗ trợ tạo tài khoản.</p><button class="btn green" style="width:100%" id="lkContact">📞 Liên hệ tác giả</button><p class="small">Đã có tài khoản? <a href="#" id="goLogin2">Đăng nhập</a></p></div>`;
+    $('#lkContact').onclick=()=>renderContact(); $('#goLogin2').onclick=e=>{e.preventDefault();renderLogin();}; return; }
   app.innerHTML=`<div class="card join"><h1>📝 Đăng ký tài khoản giáo viên</h1>${msg?`<div class="notice">${esc(msg)}</div>`:''}
   <input id="rn" placeholder="Họ và tên của thầy/cô"><input id="re" type="email" placeholder="Email"><input id="rp" type="password" placeholder="Mật khẩu (ít nhất 6 ký tự)">
   <button class="btn green" style="width:100%" id="doReg">Đăng ký</button>
-  <p class="small">Sau khi đăng ký, tài khoản ở trạng thái <b>chờ phê duyệt</b>. Admin duyệt xong thầy/cô mới đăng nhập được, và khi được duyệt sẽ tự động dùng <b>gói Free</b>.</p>
+  ${(window.__siteSettings||{}).regFree?'<p class="small">Hệ thống đang mở <b>đăng ký tự do</b>: đăng ký xong là đăng nhập dùng ngay với <b>gói Free</b>, không cần chờ phê duyệt.</p>':'<p class="small">Sau khi đăng ký, tài khoản ở trạng thái <b>chờ phê duyệt</b>. Admin duyệt xong thầy/cô mới đăng nhập được, và khi được duyệt sẽ tự động dùng <b>gói Free</b>.</p>'}
   <p class="small">Đã có tài khoản? <a href="#" id="goLogin">Đăng nhập</a></p></div>`;
   $('#goLogin').onclick=e=>{e.preventDefault();renderLogin();};
   $('#doReg').onclick=async()=>{ const name=$('#rn').value.trim(), email=$('#re').value.trim(), pass=$('#rp').value;
     if(!name||!email||pass.length<6) return alert('Thầy/cô nhập họ tên, email và mật khẩu ít nhất 6 ký tự nhé!');
     if(DEMO) return alert('Bản demo chưa nối Firebase nên chưa đăng ký được.');
+    const st2 = window.__siteSettings||{};
+    if (st2.regLock) return renderRegister();
+    const devId = myDeviceId(); const ip = await getIP();
+    const ipKey = (ip && ip!=='Không rõ') ? 'regip_' + String(ip).replace(/[^0-9a-fA-F]/g,'_') : '';
+    const devDoc = await F.getDoc(F.doc(db,'plans','regdev_'+devId));
+    const ipDoc = ipKey ? await F.getDoc(F.doc(db,'plans',ipKey)) : null;
+    if (devDoc.exists() || (ipDoc && ipDoc.exists())){
+      app.innerHTML=`<div class="card join"><h1>⚠️ Đăng ký thất bại</h1><div class="notice">Hệ thống nghi ngờ bạn Spam tài khoản, quá trình đăng ký thất bại.</div><p class="small">Mỗi thiết bị / địa chỉ IP chỉ được đăng ký 01 tài khoản. Nếu thầy/cô cho rằng đây là nhầm lẫn, vui lòng liên hệ tác giả để được hỗ trợ:</p><button class="btn green" style="width:100%" id="spamContact">📞 Liên hệ tác giả</button><p class="small"><a href="#" id="spamHome">← Về trang chủ</a></p></div>`;
+      $('#spamContact').onclick=()=>renderContact(); $('#spamHome').onclick=e=>{e.preventDefault();renderHome();}; return; }
     try{ const cred=await A.createUserWithEmailAndPassword(auth,email,pass);
       const admins=await F.getDocs(F.query(F.collection(db,'users'),F.where('role','==','admin'),F.limit(1)));
       const isFirstAdmin = admins.empty || ADMIN_EMAILS.includes(email.toLowerCase());
-      await F.setDoc(F.doc(db,'users',cred.user.uid),{ email, displayName:name, role:isFirstAdmin?'admin':'teacher', status:isFirstAdmin?'approved':'pending',
+      await F.setDoc(F.doc(db,'users',cred.user.uid),{ email, displayName:name, role:isFirstAdmin?'admin':'teacher', status:(isFirstAdmin||st2.regFree)?'approved':'pending',
         plan:'free', features:defaultFeatures(), expiresAt:isFirstAdmin?null:Date.now()+365*24*3600*1000, createdAt:Date.now(), lastLoginAt:0 });
+      try{ await F.setDoc(F.doc(db,'plans','regdev_'+devId),{ email, ip, at:Date.now() }); if(ipKey) await F.setDoc(F.doc(db,'plans',ipKey),{ email, device:devId, at:Date.now() }); }catch{}
       await A.signOut(auth);
-      renderLogin(isFirstAdmin?'Đăng ký thành công! Đây là tài khoản admin đầu tiên nên đã được duyệt sẵn — thầy/cô đăng nhập luôn nhé.':'Đăng ký thành công! Tài khoản đang chờ admin phê duyệt. Khi được duyệt, tài khoản tự động dùng gói Free.');
+      renderLogin(isFirstAdmin?'Đăng ký thành công! Đây là tài khoản admin đầu tiên nên đã được duyệt sẵn — thầy/cô đăng nhập luôn nhé.':(st2.regFree?'Đăng ký thành công! Hệ thống đang mở đăng ký tự do nên tài khoản dùng được ngay với gói Free — thầy/cô đăng nhập luôn nhé.':'Đăng ký thành công! Tài khoản đang chờ admin phê duyệt. Khi được duyệt, tài khoản tự động dùng gói Free.'));
     }catch(e){ alert('Đăng ký chưa được: '+(e.code==='auth/email-already-in-use'?'Email này đã được đăng ký.':e.message)); } };
 }
 function renderLogin(msg){
   app.innerHTML=`<div class="card join"><h1>🔐 Đăng nhập</h1>${msg?`<div class="notice">${esc(msg)}</div>`:''}
   <input id="le" type="email" placeholder="Email"><input id="lp" type="password" placeholder="Mật khẩu">
   <button class="btn green" style="width:100%" id="doLogin">Đăng nhập</button>
+  <button class="btn light" style="width:100%;margin-top:8px" id="forgotBtn">🔑 Quên mật khẩu</button>
+  <div id="forgotBox" style="display:none;margin-top:10px"><div class="notice">Nếu quên mật khẩu, thầy/cô vui lòng liên hệ tác giả để được hỗ trợ cấp lại mật khẩu.</div><button class="btn green" style="width:100%" id="forgotContact">📞 Liên hệ tác giả</button></div>
   <p class="small">Chưa có tài khoản? <a href="#" id="goReg">Đăng ký</a> (cần admin phê duyệt)</p>
   <p class="small">Học sinh không cần tài khoản — nhập mã PIN ở Trang chủ để vào chơi.</p></div>`;
   $('#goReg').onclick=e=>{e.preventDefault();renderRegister();};
+  $('#forgotBtn').onclick=()=>{ $('#forgotBox').style.display='block'; };
+  $('#forgotContact').onclick=()=>renderContact();
   $('#doLogin').onclick=async()=>{ const email=$('#le').value.trim(), pass=$('#lp').value;
     if(!email||!pass) return alert('Thầy/cô nhập email và mật khẩu nhé!'); if(DEMO) return alert('Bản demo chưa nối Firebase.');
     try{ await A.signInWithEmailAndPassword(auth,email,pass); }
@@ -848,6 +889,7 @@ async function renderAdminMembers(box){
     <td><div class="row">
       ${u.status==='pending'?`<button class="btn green" data-act="approve" data-u="${u.uid}">Duyệt</button>`:''}
       ${u.status!=='blocked'?`<button class="btn red" data-act="block" data-u="${u.uid}">Chặn</button>`:`<button class="btn green" data-act="unblock" data-u="${u.uid}">Bỏ chặn</button>`}
+      <button class="btn light" data-act="resetpw" data-u="${u.uid}">🔑 Reset MK</button>
       <button class="btn light" data-act="edit" data-u="${u.uid}">Sửa</button>
       ${u.uid!==me.uid?`<button class="btn gray" data-act="delete" data-u="${u.uid}">Xoá</button>`:''}
     </div><div data-edit="${u.uid}"></div></td></tr>`).join('')}</table></div>`;
@@ -860,6 +902,9 @@ async function renderAdminMembers(box){
     if(act==='block'&&confirm(`Chặn tài khoản ${u.email}?`)){ await F.updateDoc(ref,{status:'blocked'}); renderAdmin('members'); }
     if(act==='unblock'){ await F.updateDoc(ref,{status:'approved'}); renderAdmin('members'); }
     if(act==='delete'&&confirm(`XOÁ thành viên ${u.email}? Tài khoản sẽ không đăng nhập được nữa.`)){ const ds=await F.getDocs(F.collection(db,'users',uid,'devices')); for(const d of ds.docs) await F.deleteDoc(d.ref); await F.deleteDoc(ref); renderAdmin('members'); }
+    if(act==='resetpw'){ if(!confirm(`Reset mật khẩu cho ${u.email}?\n\nHệ thống sẽ gửi email đặt lại mật khẩu của Firebase tới địa chỉ này, đồng thời bật chế độ bắt buộc đổi mật khẩu ở lần đăng nhập tiếp theo.`)) return;
+      try{ await A.sendPasswordResetEmail(auth, u.email); await F.updateDoc(ref,{forcePwChange:true}); alert(`Đã gửi email đặt lại mật khẩu tới ${u.email} và bật chế độ bắt buộc đổi mật khẩu khi đăng nhập.`); }
+      catch(e){ alert('Chưa gửi được email đặt lại mật khẩu: '+e.message); } }
     if(act==='edit'){ const eb=box.querySelector(`[data-edit="${uid}"]`);
       eb.innerHTML=`<div style="min-width:280px;text-align:left">
       <input data-e="name" value="${esc(u.displayName||'')}" placeholder="Tên thành viên">
@@ -917,13 +962,17 @@ async function renderAdminSettings(box){
   <div class="card" style="background:#fafafa"><h2>🎨 CSS tuỳ chỉnh (nhúng vào thẻ &lt;head&gt;)</h2>
   <p class="small">Dán mã CSS vào đây để tự tạo hiệu ứng trang riêng (đổi màu nền, viền thẻ, hoạt ảnh...). CSS được chèn vào thẻ &lt;head&gt; của trang và áp dụng cho mọi người dùng. Ví dụ: <code>.card{border:2px solid #f9a8d4}</code></p>
   <textarea id="stCss" rows="7" style="font-family:Consolas,monospace;font-size:14px" placeholder="/* Dán CSS tuỳ chỉnh tại đây */">${esc(st.customCss||'')}</textarea></div>
+  <div class="card" style="background:#fafafa"><h2>🔐 Đăng ký tài khoản</h2>
+  <label class="small"><input type="checkbox" id="stRegFree" ${st.regFree?'checked':''} style="width:auto"> <b>Đăng ký tự do</b> — đăng ký xong dùng ngay, không cần admin phê duyệt</label><br>
+  <label class="small"><input type="checkbox" id="stRegLock" ${st.regLock?'checked':''} style="width:auto"> <b>Khóa đăng ký</b> — không cho đăng ký tài khoản mới (khi đang khóa, Đăng ký tự do không còn tác dụng)</label>
+  <p class="small">Hệ thống tự chống spam: mỗi thiết bị / địa chỉ IP chỉ được đăng ký 1 tài khoản; đăng ký thêm sẽ bị từ chối kèm bảng liên hệ tác giả.</p></div>
   <button class="btn green" id="stSave">💾 Lưu cài đặt</button> <span id="stMsg" class="small"></span>`;
   const bf=$('#stBgFile'); if(bf) bf.onchange=async()=>{ const f=bf.files[0]; if(!f) return; bgImg=await compressImage(f); $('#stBgPrev').innerHTML=`<img src="${bgImg}" style="width:100%;max-height:160px;object-fit:cover;border-radius:10px">`; };
   const bd=$('#stBgDel'); if(bd) bd.onclick=()=>{ bgImg=''; $('#stBgPrev').innerHTML=''; const f=$('#stBgFile'); if(f) f.value=''; };
   const den=$('#stFxDen'); if(den) den.oninput=()=>{ $('#stFxDenVal').textContent=den.value; };
   const spd=$('#stFxSpd'); if(spd) spd.oninput=()=>{ $('#stFxSpdVal').textContent=spd.value; };
   const siz=$('#stFxSize'); if(siz) siz.oninput=()=>{ $('#stFxSizeVal').textContent=siz.value; };
-  $('#stSave').onclick=async()=>{ await saveSiteSettings({ version: $('#stVersion').value.trim()||'1.0', bgImage: bgImg, effect:{ type: $('#stFxType').value, density:+$('#stFxDen').value, speed:+$('#stFxSpd').value, size:+$('#stFxSize').value }, customCss: $('#stCss').value });
+  $('#stSave').onclick=async()=>{ await saveSiteSettings({ version: $('#stVersion').value.trim()||'1.0', bgImage: bgImg, effect:{ type: $('#stFxType').value, density:+$('#stFxDen').value, speed:+$('#stFxSpd').value, size:+$('#stFxSize').value }, customCss: $('#stCss').value, regFree: $('#stRegFree').checked, regLock: $('#stRegLock').checked });
     $('#stMsg').textContent='✔ Đã lưu — cài đặt đang được áp dụng cho mọi người dùng.'; };
 }
 async function renderAdminPlans(box){
