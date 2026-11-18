@@ -19,7 +19,7 @@ const PLAN_DEFAULTS = {
   admin: { name:'Admin', features:{library:1,create:1,host:1,practice:1,reports:1,upload:1,ai:1,classes:1,systemKeys:1,branding:1}, limits:{maxQuizzes:0,  maxQuestions:0,   maxClasses:0,  maxMembersPerClass:0,  maxDevices:0} },
   custom:{ name:'Custom',features:{library:1,create:1,host:1,practice:1,reports:0,upload:1,ai:0,classes:1,systemKeys:0,branding:0}, limits:{maxQuizzes:3,  maxQuestions:20,  maxClasses:1,  maxMembersPerClass:30, maxDevices:2} }
 };
-const LIMIT_LABELS = [['maxQuizzes','Số bộ đề tối đa'],['maxQuestions','Số câu tối đa / 1 bộ đề'],['maxClasses','Số lớp được tạo'],['maxMembersPerClass','Số thành viên / 1 lớp'],['maxDevices','Số thiết bị đăng nhập tối đa / 1 tài khoản (theo tên thiết bị + IP, 0 = không giới hạn)']];
+const LIMIT_LABELS = [['maxQuizzes','Số bộ đề tối đa'],['maxQuestions','Số câu tối đa / 1 bộ đề'],['maxClasses','Số lớp được tạo'],['maxMembersPerClass','Số thành viên / 1 lớp'],['maxDevices','Số thiết bị đăng nhập tối đa / 1 tài khoản (mỗi thiết bị có 1 ID riêng, 0 = không giới hạn)']];
 
 const $ = s => document.querySelector(s);
 let aiPastedImages = [];
@@ -79,7 +79,7 @@ function openMathEditor(){
     modal.innerHTML = `<div style="background:#fff;border-radius:16px;padding:20px;max-width:640px;width:100%">
       <h2 style="margin-top:0">🧮 Soạn công thức trực quan</h2>
       <p class="small">Gõ hoặc bấm bàn phím ảo: phân số, căn, lũy thừa, ký hiệu Toán và Hóa học. Xong bấm Chèn — công thức sẽ vào đúng vị trí con trỏ trong ô câu hỏi/đáp án.</p>
-      <math-field id="mfField" style="width:100%;font-size:24px;border:2px solid #46178f;border-radius:10px;padding:10px"></math-field>
+      <math-field id="mfField" style="width:100%;font-size:24px;border:2px solid #a78bfa;border-radius:10px;padding:10px"></math-field>
       <div class="row" style="margin-top:14px"><button class="btn green grow" id="mfInsert">⬇️ Chèn vào vị trí con trỏ</button>
       <a class="btn light" href="https://www.codecogs.com/latex/eqneditor.php" target="_blank" rel="noopener">Mở trang soạn LaTeX đầy đủ</a>
       <button class="btn gray" id="mfClose">Đóng</button></div></div>`;
@@ -127,7 +127,7 @@ async function init(){
     if (chk!==true){ await A.signOut(auth); me=null; paintAuth(); alert(chk); renderHome(); return; }
     const devLimit = me.role==='admin' ? 0 : (myPlan().limits?.maxDevices ?? 2);
     if (devLimit>0){ const fd = await findMyDevice(user.uid);
-      if (!fd.match && fd.count >= devLimit){ await A.signOut(auth); me=null; paintAuth(); alert(`Tài khoản này đã đăng nhập trên tối đa ${devLimit} thiết bị (giới hạn của gói ${myPlan().name}, tính theo tên thiết bị và địa chỉ IP). Thầy/cô hãy đăng xuất ở một thiết bị cũ, hoặc liên hệ admin để nâng giới hạn nhé.`); renderHome(); return; } }
+      if (!fd.match && fd.count >= devLimit){ await A.signOut(auth); me=null; paintAuth(); alert(`Tài khoản này đã đăng nhập trên tối đa ${devLimit} thiết bị (giới hạn của gói ${myPlan().name}, mỗi thiết bị được nhận diện bằng một ID riêng). Thầy/cô hãy đăng xuất ở một thiết bị cũ, hoặc liên hệ admin để nâng giới hạn nhé.`); renderHome(); return; } }
     await F.updateDoc(F.doc(db,'users',user.uid), { lastLoginAt: Date.now() });
     await registerDevice(me.uid);
     paintAuth(); renderHome(); if(!maybeDeepLink()) maybeResumeLive();
@@ -142,10 +142,14 @@ function deviceName(){ const ua=navigator.userAgent; let os='Thiết bị khác'
   if (/Edg\//.test(ua)) br=' • Edge'; else if (/Chrome\//.test(ua)) br=' • Chrome'; else if (/Firefox\//.test(ua)) br=' • Firefox'; else if (/Safari\//.test(ua)) br=' • Safari';
   return os+br; }
 async function getIP(){ try{ const ctl=new AbortController(); setTimeout(()=>ctl.abort(),3000); const r=await fetch('https://api.ipify.org?format=json',{signal:ctl.signal}); const j=await r.json(); return j.ip||'Không rõ'; }catch{ return 'Không rõ'; } }
-async function findMyDevice(uid){ const name=deviceName(), ip=await getIP(); const ds=await F.getDocs(F.collection(db,'users',uid,'devices')); const lid=localStorage.getItem('eq_device_id'); let match=null;
-  ds.forEach(d=>{ const v=d.data(); if(d.id===lid || (v.name===name && v.ip===ip)) match={id:d.id, ...v}; }); return { count: ds.size, match, name, ip }; }
-async function registerDevice(uid){ const fd = await findMyDevice(uid); let id = fd.match?.id || localStorage.getItem('eq_device_id'); if(!id) id='dev'+Date.now()+Math.floor(Math.random()*99999); localStorage.setItem('eq_device_id', id);
-  await F.setDoc(F.doc(db,'users',uid,'devices',id), { name: fd.name, ip: fd.ip, userAgent:navigator.userAgent, firstLoginAt: fd.match?.firstLoginAt || Date.now(), lastLoginAt: Date.now() }); }
+async function findMyDevice(uid){ // Nhan dien thiet bi bang ID rieng luu tren chinh thiet bi do: doi IP van la 1 thiet bi
+  const ds=await F.getDocs(F.collection(db,'users',uid,'devices')); const lid=localStorage.getItem('eq_device_id'); let match=null;
+  ds.forEach(d=>{ if(d.id===lid) match={id:d.id, ...d.data()}; }); return { count: ds.size, match }; }
+async function registerDevice(uid){ let id=localStorage.getItem('eq_device_id'); if(!id){ id='dev'+Date.now()+Math.floor(Math.random()*99999); localStorage.setItem('eq_device_id',id); }
+  const ref=F.doc(db,'users',uid,'devices',id); const old=await F.getDoc(ref); const ip=await getIP();
+  const prev=(old.exists()&&Array.isArray(old.data().logins))?old.data().logins:[];
+  const logins=[{at:Date.now(), ip}, ...prev].slice(0,30); // Lich su dang nhap cua thiet bi (moi nhat truoc, giu 30 lan)
+  await F.setDoc(ref,{ name:deviceName(), ip, userAgent:navigator.userAgent, firstLoginAt: old.exists()?old.data().firstLoginAt:Date.now(), lastLoginAt: Date.now(), logins }); }
 
 // ---------- Thanh tài khoản + điều hướng ----------
 const NAV_FEATURES = { library:'library', import:'upload', ai:'ai', classes:'classes', reports:'reports' };
@@ -222,7 +226,7 @@ const store = {
     const ref=F.doc(db,'sessions',pin,'players',playerId); const sn=await F.getDoc(ref); if(!sn.exists()||sn.data().cheats?.[qIdx]) return;
     await F.updateDoc(ref,{ cheatCount:(sn.data().cheatCount||0)+1, [`cheats.${qIdx}`]:true }); },
   async createSession(quiz){ const pin=String(Math.floor(100000+Math.random()*900000));
-    const data={quizId:quiz.id,title:quiz.title,questions:quiz.questions,status:'lobby',currentQuestion:-1,questionStartedAt:0,createdAt:Date.now(),hostUid:me?.uid||''};
+    const data={quizId:quiz.id,title:quiz.title,questions:quiz.questions,status:'lobby',currentQuestion:-1,questionStartedAt:0,createdAt:Date.now(),hostUid:me?.uid||'',cover:quiz.cover||'',coverFade:quiz.coverFade??80,contestBg:quiz.contestBg||'',bgFade:quiz.bgFade??85};
     if(DEMO){ localStorage.setItem('eq_session_'+pin,JSON.stringify(data)); localStorage.setItem('eq_players_'+pin,'[]'); }
     else await F.setDoc(F.doc(db,'sessions',pin),{...data,createdAt:F.serverTimestamp()}); return pin; },
   async getSession(pin){ if(DEMO){ const v=localStorage.getItem('eq_session_'+pin); return v?JSON.parse(v):null; }
@@ -386,12 +390,12 @@ async function renderLibrary(){
   <button class="btn" data-editq="${q.id}" ${can('create')?'':'disabled'}>✏️ Sửa bộ đề</button>
   <button class="btn red" data-delq="${q.id}">🗑️ Xóa bộ đề</button></div>
   <div data-qlist="${q.id}" style="display:none;margin-top:10px">${q.questions.map((qq,i)=>`<div style="border-top:1px solid #eee;padding:8px 0"><b>Câu ${i+1}:</b> ${richHtml(qq.text)} <span class="small">(${qq.time||20} giây • ${qq.points||0} điểm)</span>${mediaHtml(qq)}
-  ${(qq.type==='tf'?['Đúng','Sai']:qq.answers).map((a,j)=>`<div class="small" style="margin-left:14px">${SHAPES[j]} ${richHtml(a)}${j===qq.correct?' <b style="color:#26890c">✔ Đáp án đúng</b>':''}</div>`).join('')}</div>`).join('')}</div></div>`).join('')}</div>`;
+  ${(qq.type==='tf'?['Đúng','Sai']:qq.answers).map((a,j)=>`<div class="small" style="margin-left:14px">${SHAPES[j]} ${richHtml(a)}${j===qq.correct?' <b style="color:#16a34a">✔ Đáp án đúng</b>':''}</div>`).join('')}</div>`).join('')}</div></div>`).join('')}</div>`;
   math(app);
   app.querySelectorAll('[data-host]').forEach(b=>b.onclick=async()=>{ const q=await store.getQuiz(b.dataset.host); renderHost(await store.createSession(q)); });
   app.querySelectorAll('[data-practice]').forEach(b=>b.onclick=async()=>{ if(requireLogin('practice')) renderPractice(await store.getQuiz(b.dataset.practice)); });
   app.querySelectorAll('[data-viewq]').forEach(b=>b.onclick=()=>{ const el=app.querySelector(`[data-qlist="${b.dataset.viewq}"]`); el.style.display = el.style.display==='none'?'block':'none'; math(el); });
-  app.querySelectorAll('[data-editq]').forEach(b=>b.onclick=async()=>{ const q=await store.getQuiz(b.dataset.editq); renderCreate(q.questions, q.title, q.subject, q.id, q.cover||'', q.contestBg||''); });
+  app.querySelectorAll('[data-editq]').forEach(b=>b.onclick=async()=>{ const q=await store.getQuiz(b.dataset.editq); renderCreate(q.questions, q.title, q.subject, q.id, q.cover||'', q.contestBg||'', q.coverFade, q.bgFade); });
   app.querySelectorAll('[data-delq]').forEach(b=>b.onclick=async()=>{ const q=await store.getQuiz(b.dataset.delq); if(confirm('Xóa hẳn bộ đề “'+(q?.title||'')+'” khỏi thư viện? Bộ đề sẽ biến mất và không tổ chức được nữa.')){ await store.deleteQuiz(b.dataset.delq); renderLibrary(); } });
 }
 
@@ -420,13 +424,16 @@ function renderContestHub(){
   const l=$('#ctLive'); if(l) l.onclick=()=>renderLibrary();
   const a=$('#ctAsync'); if(a) a.onclick=()=>renderContests();
 }
-function renderCreate(prefill, title0, subject0, editId, cover0, bg0){
+function renderCreate(prefill, title0, subject0, editId, cover0, bg0, cFade0, bFade0){
   let questions = prefill ? structuredClone(prefill) : [emptyQ()];
   let coverImg = cover0||'', bgImg = bg0||'';
+  let coverFade = (cFade0===undefined||cFade0===null)?80:+cFade0, bgFade = (bFade0===undefined||bFade0===null)?85:+bFade0;
   const draw=()=>{ app.innerHTML=`<div class="card"><h1>✏️ Tạo bộ câu hỏi</h1>
     <input id="qt" placeholder="Tiêu đề bộ câu hỏi" value="${esc(title0||'')}"><input id="qs" placeholder="Môn học / chủ đề" value="${esc(subject0||'')}">
-    ${can('branding')?`<div class="row"><div class="grow"><label class="small"><b>🖼️ Ảnh bìa bộ đề</b> (hiển thị ở Thư viện)</label><input type="file" accept="image/*" id="coverFile"><div id="coverPrev">${coverImg?`<img src="${coverImg}" style="width:100%;max-height:150px;object-fit:cover;border-radius:10px">`:''}</div></div>
-    <div class="grow"><label class="small"><b>🌄 Ảnh nền cuộc thi</b> (hiển thị khi học sinh vào phòng thi)</label><input type="file" accept="image/*" id="bgFile"><div id="bgPrev">${bgImg?`<img src="${bgImg}" style="width:100%;max-height:150px;object-fit:cover;border-radius:10px">`:''}</div></div></div>`:''}
+    ${can('branding')?`<div class="row"><div class="grow"><label class="small"><b>🖼️ Ảnh bìa bộ đề</b> (hiện ở Thư viện và phòng chờ)</label><input type="file" accept="image/*" id="coverFile"><div id="coverPrev">${coverImg?`<img src="${coverImg}" style="width:100%;max-height:150px;object-fit:cover;border-radius:10px">`:''}</div>
+    <div class="row"><label class="small">Độ mờ ảnh bìa: <b id="coverFadeVal">${coverFade}%</b></label><input type="range" id="coverFadeR" min="0" max="100" value="${coverFade}" class="grow" style="width:auto;margin:0"><button type="button" class="btn red" id="coverDel" style="padding:6px 12px;font-size:13px">🗑️ Xóa ảnh bìa</button></div></div>
+    <div class="grow"><label class="small"><b>🌄 Ảnh nền cuộc thi</b> (hiện ở khu vực thi của học sinh)</label><input type="file" accept="image/*" id="bgFile"><div id="bgPrev">${bgImg?`<img src="${bgImg}" style="width:100%;max-height:150px;object-fit:cover;border-radius:10px">`:''}</div>
+    <div class="row"><label class="small">Độ mờ ảnh nền: <b id="bgFadeVal">${bgFade}%</b></label><input type="range" id="bgFadeR" min="0" max="100" value="${bgFade}" class="grow" style="width:auto;margin:0"><button type="button" class="btn red" id="bgDel" style="padding:6px 12px;font-size:13px">🗑️ Xóa ảnh nền</button></div></div></div>`:''}
     <div class="notice small">💡 <b>Công thức Toán/Hóa:</b> viết trong dấu $, ví dụ $x^2+2x+1=0$, phân số $\\frac{1}{2}$, hóa học $\\ce{H2SO4 + 2NaOH -> Na2SO4 + 2H2O}$, ký hiệu $H_2O$, $\\sqrt{16}$, $\\alpha, \\beta, \\pi$. Xem trước ở khung dưới mỗi câu.<br>
     🖼️ <b>Media:</b> dán link ảnh/video/âm thanh, hoặc tải ảnh lên (ảnh được nén nhỏ). Video YouTube dán link watch là xem được.</div>
     <div id="qlist"></div>
@@ -442,7 +449,7 @@ function renderCreate(prefill, title0, subject0, editId, cover0, bg0){
       <label class="btn light" style="cursor:pointer">📷 Tải ảnh<input type="file" accept="image/*" data-upload="${i}" style="display:none"></label></div>
       <div class="row"><button class="btn light" data-mathbtn="${i}">🧮 Soạn công thức trực quan</button><button class="btn light" data-insmedia="${i}">⬇️ Chèn media vào vị trí con trỏ</button><span class="small">Đặt con trỏ vào ô câu hỏi/đáp án trước, rồi bấm chèn.</span></div>
       ${q.type==='tf'?`<div class="row"><button class="btn ${q.correct===0?'green':'light'}" data-tf="${i}" data-v="0">✔ Đúng là đáp án đúng</button><button class="btn ${q.correct===1?'green':'light'}" data-tf="${i}" data-v="1">✖ Sai là đáp án đúng</button></div>`
-      : q.answers.map((a,j)=>`<div class="row"><span class="shape" style="color:#46178f">${SHAPES[j]}</span><input class="grow" data-q="${i}" data-a="${j}" placeholder="Phương án ${j+1} (gõ $...$ cho công thức)" value="${richHtml(a)}"><label><input type="radio" name="c${i}" data-q="${i}" data-c="${j}" ${q.correct===j?'checked':''} style="width:auto"> Đúng</label></div>`).join('')}
+      : q.answers.map((a,j)=>`<div class="row"><span class="shape" style="color:#7c3aed">${SHAPES[j]}</span><input class="grow" data-q="${i}" data-a="${j}" placeholder="Phương án ${j+1} (gõ $...$ cho công thức)" value="${richHtml(a)}"><label><input type="radio" name="c${i}" data-q="${i}" data-c="${j}" ${q.correct===j?'checked':''} style="width:auto"> Đúng</label></div>`).join('')}
       <div class="small" style="background:#fff;border:1px dashed #bbb;border-radius:8px;padding:8px;margin-top:8px">Xem trước đáp án (như học sinh thấy):
       ${q.type==='tf'?`<div class="answers" style="pointer-events:none;margin-top:6px"><button class="ans a0" style="min-height:44px;padding:10px;font-size:15px">✔ Đúng</button><button class="ans a1" style="min-height:44px;padding:10px;font-size:15px">✖ Sai</button></div>`
       :`<div class="answers" style="pointer-events:none;margin-top:6px">${q.answers.map((a,j)=>`<button class="ans ${COLORS[j]}" style="min-height:44px;padding:10px;font-size:15px"><span class="shape">${SHAPES[j]}</span><span data-preview-a="${i}-${j}">${richHtml(a)}</span></button>`).join('')}</div>`}</div>
@@ -453,6 +460,10 @@ function renderCreate(prefill, title0, subject0, editId, cover0, bg0){
     app.querySelectorAll('[data-mathbtn]').forEach(b=>b.onclick=()=>{ sync(); openMathEditor(); });
     const cf=$('#coverFile'); if(cf) cf.onchange=async()=>{ const f=cf.files[0]; if(!f) return; coverImg=await compressImage(f); $('#coverPrev').innerHTML=`<img src="${coverImg}" style="width:100%;max-height:150px;object-fit:cover;border-radius:10px">`; };
     const bf=$('#bgFile'); if(bf) bf.onchange=async()=>{ const f=bf.files[0]; if(!f) return; bgImg=await compressImage(f); $('#bgPrev').innerHTML=`<img src="${bgImg}" style="width:100%;max-height:150px;object-fit:cover;border-radius:10px">`; };
+    const cfr=$('#coverFadeR'); if(cfr) cfr.oninput=()=>{ coverFade=+cfr.value; $('#coverFadeVal').textContent=coverFade+'%'; };
+    const bfr=$('#bgFadeR'); if(bfr) bfr.oninput=()=>{ bgFade=+bfr.value; $('#bgFadeVal').textContent=bgFade+'%'; };
+    const cd=$('#coverDel'); if(cd) cd.onclick=()=>{ coverImg=''; $('#coverPrev').innerHTML=''; const f=$('#coverFile'); if(f) f.value=''; };
+    const bd=$('#bgDel'); if(bd) bd.onclick=()=>{ bgImg=''; $('#bgPrev').innerHTML=''; const f=$('#bgFile'); if(f) f.value=''; };
     app.querySelectorAll('[data-insmedia]').forEach(b=>b.onclick=()=>{ sync(); const q=questions[+b.dataset.insmedia]; const url=q.media?.url||''; if(!url) return alert('Câu này chưa có media. Thầy/cô dán link media hoặc tải ảnh lên trước nhé!'); insertAtCursor('[media:'+url+']'); });
     app.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>{ sync(); questions[+b.dataset.tf].correct=+b.dataset.v; draw(); });
     app.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ sync(); questions.splice(+b.dataset.del,1); draw(); });
@@ -460,8 +471,8 @@ function renderCreate(prefill, title0, subject0, editId, cover0, bg0){
     $('#saveQ').onclick=async()=>{ sync(); const title=$('#qt').value.trim(); if(!title||questions.some(q=>!q.text.trim())) return alert('Thầy điền tiêu đề và nội dung cho mọi câu hỏi nhé!');
       questions.forEach(q=>{ if(q.type==='tf') q.answers=['Đúng','Sai']; q.time=+q.time; q.points=+q.points; if(q.media&&!q.media.url) q.media=null; });
       const chk=await checkQuizLimits(questions.length, editId); if(chk!==true) return alert(chk);
-      if(editId){ await store.updateQuiz(editId,{title,subject:$('#qs').value.trim(),questions,cover:coverImg,contestBg:bgImg}); alert('Đã cập nhật bộ đề!'); }
-      else await store.createQuiz({title,subject:$('#qs').value.trim(),questions,cover:coverImg,contestBg:bgImg,ownerUid:me?.uid||'',ownerEmail:me?.email||''});
+      if(editId){ await store.updateQuiz(editId,{title,subject:$('#qs').value.trim(),questions,cover:coverImg,contestBg:bgImg,coverFade,bgFade}); alert('Đã cập nhật bộ đề!'); }
+      else await store.createQuiz({title,subject:$('#qs').value.trim(),questions,cover:coverImg,contestBg:bgImg,coverFade,bgFade,ownerUid:me?.uid||'',ownerEmail:me?.email||''});
       renderLibrary(); };
     function sync(){ app.querySelectorAll('[data-q]').forEach(el=>{ const q=questions[+el.dataset.q]; if(!q) return;
       if(el.dataset.f==='text') q.text=el.value; else if(el.dataset.f==='type') q.type=el.value; else if(el.dataset.f==='time') q.time=el.value; else if(el.dataset.f==='points') q.points=el.value;
@@ -663,7 +674,7 @@ function renderAI(){
   <div id="aiResult" style="margin-top:14px"></div></div>`;
   let pastedImages = aiPastedImages;
   const drawPastePrev = ()=>{ const box=$('#aiPastePrev'); if(!box) return;
-    box.innerHTML = pastedImages.length? `<p class="small">📎 Đã có <b>${pastedImages.length} ảnh</b> chụp màn hình đính kèm — xem từng ảnh bên dưới, bấm ✕ Bỏ để loại ảnh không cần:</p>` + pastedImages.map((f,i)=>`<span style="display:inline-block;text-align:center;margin:4px;vertical-align:top"><img src="${URL.createObjectURL(f)}" style="width:92px;height:68px;object-fit:cover;border-radius:8px;border:2px solid #46178f"><br><span class="small"><b>Ảnh ${i+1}</b></span> <button type="button" class="btn red" data-rmpaste="${i}" style="padding:1px 8px;font-size:12px">✕ Bỏ</button></span>`).join('') : '';
+    box.innerHTML = pastedImages.length? `<p class="small">📎 Đã có <b>${pastedImages.length} ảnh</b> chụp màn hình đính kèm — xem từng ảnh bên dưới, bấm ✕ Bỏ để loại ảnh không cần:</p>` + pastedImages.map((f,i)=>`<span style="display:inline-block;text-align:center;margin:4px;vertical-align:top"><img src="${URL.createObjectURL(f)}" style="width:92px;height:68px;object-fit:cover;border-radius:8px;border:2px solid #a78bfa"><br><span class="small"><b>Ảnh ${i+1}</b></span> <button type="button" class="btn red" data-rmpaste="${i}" style="padding:1px 8px;font-size:12px">✕ Bỏ</button></span>`).join('') : '';
     box.querySelectorAll('[data-rmpaste]').forEach(b=>b.onclick=()=>{ pastedImages.splice(+b.dataset.rmpaste,1); drawPastePrev(); }); };
   const savedKey = localStorage.getItem('eq_my_key')||''; if (savedKey && !$('#aiKey').value) $('#aiKey').value = savedKey;
   $('#saveKey').onclick = async()=>{ const k = $('#aiKey').value.trim(); if(!k) return alert('Thầy/cô dán API key vào ô trước rồi bấm Lưu nhé!');
@@ -766,7 +777,7 @@ async function renderAdminMembers(box){
     <td>${statusTxt[u.status]||esc(u.status)}</td>
     <td><b>${esc((plans[u.plan||'free']?.name)||'Free')}</b></td>
     <td>${FEATURES.map(([k,label])=>`<span class="badge" style="${!can2(u,k)?'opacity:.4;text-decoration:line-through':''}">${label}</span>`).join(' ')}</td>
-    <td data-sort="${u.expiresAt||9999999999999}">${fmtDate(u.expiresAt)}${u.expiresAt&&Date.now()>u.expiresAt?' <b style="color:#e21b3c">(hết hạn)</b>':''}</td>
+    <td data-sort="${u.expiresAt||9999999999999}">${fmtDate(u.expiresAt)}${u.expiresAt&&Date.now()>u.expiresAt?' <b style="color:#e11d48">(hết hạn)</b>':''}</td>
     <td><button class="btn light" data-devices="${u.uid}">📱 Xem (<span data-devcount="${u.uid}">…</span>)</button><div data-devlist="${u.uid}"></div></td>
     <td><div class="row">
       ${u.status==='pending'?`<button class="btn green" data-act="approve" data-u="${u.uid}">Duyệt</button>`:''}
@@ -779,7 +790,9 @@ async function renderAdminMembers(box){
   users.forEach(async u=>{ const ds=await F.getDocs(F.collection(db,'users',u.uid,'devices')); const el=box.querySelector(`[data-devcount="${u.uid}"]`); if(el) el.textContent=ds.size; });
   box.querySelectorAll('[data-devices]').forEach(b=>b.onclick=async()=>{ const uid=b.dataset.devices, dv=box.querySelector(`[data-devlist="${uid}"]`);
     if(dv.innerHTML){ dv.innerHTML=''; return; } const ds=await F.getDocs(F.collection(db,'users',uid,'devices'));
-    dv.innerHTML = ds.empty?'<p class="small">Chưa có thiết bị nào đăng nhập.</p>':ds.docs.map(d=>{ const v=d.data(); return `<p class="small" style="text-align:left">• <b>${esc(v.name)}</b><br>IP: ${esc(v.ip)}<br>Lần cuối: ${fmtDT(v.lastLoginAt)}</p>`; }).join(''); });
+    dv.innerHTML = ds.empty?'<p class="small">Chưa có thiết bị nào đăng nhập.</p>':ds.docs.map(d=>{ const v=d.data(); const logs=(Array.isArray(v.logins)&&v.logins.length)?v.logins:[{at:v.lastLoginAt,ip:v.ip},{at:v.firstLoginAt,ip:v.ip}].filter(x=>x.at);
+      return `<div style="text-align:left;margin:6px 0"><button class="btn light" data-devhist="${d.id}" style="padding:7px 12px;font-size:14px">📱 ${esc(v.name)} — IP: ${esc(v.ip)} • Lần cuối: ${fmtDT(v.lastLoginAt)}</button><div data-devhistbox="${d.id}" style="display:none;margin:6px 0 6px 14px"><b class="small">🕘 Lịch sử đăng nhập của thiết bị này (bấm lại để đóng):</b>${logs.map(l=>`<p class="small" style="margin:2px 0">• ${fmtDT(l.at)} — IP: ${esc(l.ip||'Không rõ')}</p>`).join('')||'<p class="small">Chưa có lịch sử.</p>'}</div></div>`; }).join('');
+    dv.querySelectorAll('[data-devhist]').forEach(b=>b.onclick=()=>{ const hb=dv.querySelector(`[data-devhistbox="${b.dataset.devhist}"]`); if(hb) hb.style.display=hb.style.display==='none'?'block':'none'; }); });
   box.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{ const uid=b.dataset.u, act=b.dataset.act, ref=F.doc(db,'users',uid), u=users.find(x=>x.uid===uid);
     if(act==='approve'){ await F.updateDoc(ref,{status:'approved', plan:u.plan||'free'}); renderAdmin('members'); }
     if(act==='block'&&confirm(`Chặn tài khoản ${u.email}?`)){ await F.updateDoc(ref,{status:'blocked'}); renderAdmin('members'); }
@@ -792,12 +805,10 @@ async function renderAdminMembers(box){
       <label class="small">Hạn sử dụng:</label><input data-e="exp" type="date" value="${u.expiresAt?new Date(u.expiresAt).toISOString().slice(0,10):''}">
       <label class="small"><input type="checkbox" data-e="noexp" ${!u.expiresAt?'checked':''} style="width:auto"> Không giới hạn hạn dùng</label><br>
       <label class="small">Vai trò:</label><select data-e="role"><option value="teacher" ${u.role!=='admin'?'selected':''}>Giáo viên</option><option value="admin" ${u.role==='admin'?'selected':''}>Admin</option></select>
-      <b class="small">Chức năng được sử dụng (quyền cá nhân, kết hợp với gói):</b><br>
-      ${FEATURES.map(([k,label])=>`<label class="small"><input type="checkbox" data-e="f-${k}" ${u.features?.[k]!==false?'checked':''} style="width:auto"> ${label}</label><br>`).join('')}
       <button class="btn green" data-save="${uid}">💾 Lưu thay đổi</button></div>`;
-      eb.querySelector('[data-save]').onclick=async()=>{ const features={}; FEATURES.forEach(([k])=>features[k]=eb.querySelector(`[data-e="f-${k}"]`).checked);
+      eb.querySelector('[data-save]').onclick=async()=>{
         const noexp=eb.querySelector('[data-e="noexp"]').checked, expVal=eb.querySelector('[data-e="exp"]').value;
-        await F.updateDoc(ref,{displayName:eb.querySelector('[data-e="name"]').value.trim(), plan:eb.querySelector('[data-e="plan"]').value, role:eb.querySelector('[data-e="role"]').value, features, expiresAt:noexp?null:(expVal?new Date(expVal+'T23:59:59').getTime():null)});
+        await F.updateDoc(ref,{displayName:eb.querySelector('[data-e="name"]').value.trim(), plan:eb.querySelector('[data-e="plan"]').value, role:eb.querySelector('[data-e="role"]').value, expiresAt:noexp?null:(expVal?new Date(expVal+'T23:59:59').getTime():null)});
         alert('Đã lưu thay đổi.'); renderAdmin('members'); }; }
   });
 }
@@ -805,7 +816,7 @@ async function renderAdminKeys(box){
   if (DEMO){ box.innerHTML='<p>Bản demo chưa nối Firebase.</p>'; return; }
   const snap=await F.getDocs(F.collection(db,'apiKeys'));
   const keys=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.addedAt||0)-(a.addedAt||0));
-  const badge={ready:'<span class="badge" style="background:#26890c;color:#fff">🟢 Sẵn sàng</span>', quota:'<span class="badge" style="background:#ffc00a">🟡 Hết hạn mức</span>', error:'<span class="badge" style="background:#e21b3c;color:#fff">🔴 Lỗi</span>'};
+  const badge={ready:'<span class="badge" style="background:#16a34a;color:#fff">🟢 Sẵn sàng</span>', quota:'<span class="badge" style="background:#fcd34d">🟡 Hết hạn mức</span>', error:'<span class="badge" style="background:#e11d48;color:#fff">🔴 Lỗi</span>'};
   box.innerHTML=`<p class="small">Kho API key Gemini của hệ thống. Hệ thống tự xoay vòng key sẵn sàng khi tạo đề AI; key hết hạn mức sẽ chuyển vàng, key lỗi chuyển đỏ.</p>
   <div class="row"><input class="grow" id="newKey" placeholder="Thêm API key Gemini mới (AIza...)"><button class="btn green" id="addKeyBtn">+ Thêm key</button></div>
   <div style="overflow-x:auto"><table class="sortable"><tr><th>API key</th><th>Người thêm</th><th>Ngày giờ thêm</th><th>Trạng thái</th><th>Lần dùng cuối</th><th data-nosort>Thao tác</th></tr>
@@ -840,13 +851,14 @@ async function renderAdminPlans(box){
 // ---------- Phòng chơi (giáo viên + học sinh) ----------
 function renderHost(pin){
   stopListen(); let players=[], session=null, timer=null, localBoard=false, advancedFor=-1;
-  app.innerHTML=`<div class="card center"><div id="lobbyHead"><h2>📺 Phòng chờ — chiếu màn hình này cho lớp xem</h2><p>Vào PCQuiz • Nhập mã PIN:</p><div class="pinbox">${pin}</div>
+  app.innerHTML=`<div class="card center" id="hostCard"><div id="lobbyHead"><h2>📺 Phòng chờ — chiếu màn hình này cho lớp xem</h2><p>Vào PCQuiz • Nhập mã PIN:</p><div class="pinbox">${pin}</div>
   ${shareRoomHtml(pin, 190)}
   <p id="pcount" class="big">Đang chờ học sinh…</p><div id="plist"></div>
   <label class="small" style="display:block;margin-top:12px"><input type="checkbox" id="antiCheat" checked style="width:auto"> ⚠️ Bật cảnh báo gian lận (học sinh rời màn hình câu hỏi: điểm câu đó chỉ còn 50%, có ghi vào báo cáo)</label>
   <div class="row" style="justify-content:center;margin-top:14px"><button class="btn green" id="startBtn">▶ Bắt đầu trò chơi</button></div></div><div id="stage"></div></div>`;
   wireShareRoom(app);
-  store.onSession(pin,s=>{ if(session&&s&&s.status!==session.status) localBoard=false; session=s; if(s) showStage(); });
+  const applyHostBg=()=>{ const hc=$('#hostCard'); if(!hc||!session) return; const inGame=session.status!=='lobby'; const url=inGame?(session.contestBg||session.cover):session.cover; const fade=inGame?(session.bgFade??85):(session.coverFade??80); if(url){ const f=Math.min(1,Math.max(0,(+fade||0)/100)); hc.style.backgroundImage=`linear-gradient(rgba(255,255,255,${f}),rgba(255,255,255,${f})),url('${url}')`; hc.style.backgroundSize='cover'; hc.style.backgroundPosition='center'; } else hc.style.backgroundImage=''; };
+  store.onSession(pin,s=>{ if(session&&s&&s.status!==session.status) localBoard=false; session=s; if(s){ applyHostBg(); showStage(); } });
   store.onPlayers(pin,ps=>{ players=ps.sort((a,b)=>(b.score||0)-(a.score||0)); const pc=$('#pcount'); if(!pc) return; pc.textContent=session?.status==='lobby'?`${ps.length} học sinh đã vào`:'Bảng điểm trực tiếp';
     $('#plist').innerHTML=ps.map(p=>`<span class="player">${p.avatar||'🙂'} ${esc(p.nickname)} • ${p.score||0}đ</span>`).join('');
     // Tất cả học sinh đã chọn đáp án -> chuyển ngay sang màn hình đáp án/chuyển câu, không cần chờ hết giờ
@@ -887,6 +899,7 @@ function renderPlayer(pin, playerId){
   window.addEventListener('blur', onLeave);
   app.innerHTML=`<div class="card center" id="pstage"><h2>Đã vào phòng!</h2><p>Nhìn lên màn hình của thầy/cô và chờ câu hỏi nhé…</p></div>`;
   store.onSession(pin,async s=>{ if(!s) return; curSession=s; clearInterval(pTimer); const st=$('#pstage'); if(!st) return;
+    { const inGame=s.status!=='lobby'; const url=inGame?(s.contestBg||s.cover):s.cover; const fade=inGame?(s.bgFade??85):(s.coverFade??80); if(url){ const f=Math.min(1,Math.max(0,(+fade||0)/100)); st.style.backgroundImage=`linear-gradient(rgba(255,255,255,${f}),rgba(255,255,255,${f})),url('${url}')`; st.style.backgroundSize='cover'; st.style.backgroundPosition='center'; } }
     if(s.status==='lobby'){ st.innerHTML=`<h2>✅ Đã vào phòng chờ</h2><p>Chờ thầy/cô bấm Bắt đầu…</p>`; return; }
     if(s.status==='finished'){ try{ localStorage.removeItem('eq_resume_live'); }catch{} store.listPlayers(pin).then(ps=>{ const m=ps.find(p=>p.id===playerId); const rank=ps.sort((a,b)=>b.score-a.score).findIndex(p=>p.id===playerId)+1; st.innerHTML=`<h2>🏁 Trò chơi kết thúc!</h2><p class="big">Em xếp hạng ${rank} • ${m?.score||0} điểm</p>`+podium(ps); enableSorting(st); }); return; }
     if(s.status==='leaderboard'||s.status==='showing_answer'){ store.listPlayers(pin).then(ps=>{ const m=ps.find(p=>p.id===playerId); const a=m?.answers?.[s.currentQuestion];
@@ -901,8 +914,8 @@ function renderPlayer(pin, playerId){
       if(!curSession || curSession.status!=='playing' || curSession.currentQuestion!==qIdx) return; }
     if(answeredFor===s.currentQuestion){ st.innerHTML=`<h2>✔ Đã trả lời!</h2><p>Chờ các bạn khác…</p>`; return; }
     const remain0=Math.max(0,q.time-Math.floor((Date.now()-(s.questionStartedAt||Date.now()))/1000));
-    st.innerHTML=`<p class="badge">Câu ${s.currentQuestion+1}/${s.questions.length}</p> <span class="badge" id="pLeft" style="background:#e21b3c">⏱️ ${remain0} giây</span>
-    <div style="background:#eee;border-radius:99px;height:10px;margin:8px 0"><div id="pBar" style="background:#e21b3c;height:10px;border-radius:99px;width:${remain0/q.time*100}%"></div></div>
+    st.innerHTML=`<p class="badge">Câu ${s.currentQuestion+1}/${s.questions.length}</p> <span class="badge" id="pLeft" style="background:#fda4af;color:#881337">⏱️ ${remain0} giây</span>
+    <div style="background:#eee;border-radius:99px;height:10px;margin:8px 0"><div id="pBar" style="background:#fb7185;height:10px;border-radius:99px;width:${remain0/q.time*100}%"></div></div>
     <h2>${richHtml(q.text)}</h2>${mediaHtml(q)}<div class="answers">${(q.type==='tf'?['Đúng','Sai']:q.answers).map((a,i)=>`<button class="ans ${COLORS[i]}" data-a="${i}"><span class="shape">${SHAPES[i]}</span>${richHtml(a)}</button>`).join('')}</div>`; math(st);
     clearInterval(pTimer); pTimer=setInterval(()=>{ const left=Math.max(0,q.time-Math.floor((Date.now()-(s.questionStartedAt||Date.now()))/1000));
       const el=$('#pLeft'), bar=$('#pBar'); if(!el){ clearInterval(pTimer); return; }
@@ -955,7 +968,7 @@ async function renderContests(){
   const classes = (await store.listClasses()).filter(c=>me?.role==='admin'||c.ownerUid===me?.uid);
   const mine = (await contestList()).filter(c=>me?.role==='admin'||c.ownerUid===me?.uid);
   const now = Date.now();
-  const statusOf = c => now < c.startAt ? '<b style="color:#e69138">Chưa mở</b>' : now > c.endAt ? '<b style="color:#c00">Đã đóng</b>' : '<b style="color:#26890c">Đang mở</b>';
+  const statusOf = c => now < c.startAt ? '<b style="color:#d97706">Chưa mở</b>' : now > c.endAt ? '<b style="color:#e11d48">Đã đóng</b>' : '<b style="color:#16a34a">Đang mở</b>';
   app.innerHTML = `<div class="card"><h1>🏆 Tạo cuộc thi</h1>
   <label class="small"><b>Chọn bộ đề</b></label>
   <select id="ctQuiz">${quizzes.map(q=>`<option value="${q.id}">${esc(q.title)} (${q.questions.length} câu)</option>`).join('')||'<option value="">— Chưa có bộ đề nào —</option>'}</select>
@@ -979,7 +992,7 @@ async function renderContests(){
     const startAt = new Date($('#ctStart').value).getTime(), endAt = new Date($('#ctEnd').value).getTime();
     if(!startAt||!endAt||endAt<=startAt) return alert('Khung giờ thi chưa hợp lệ: giờ kết thúc phải sau giờ bắt đầu.');
     const cls = classes.find(c=>c.id===$('#ctClass').value);
-    const code = await contestCreate({ cover: quiz.cover||'', contestBg: quiz.contestBg||'', quizId: quiz.id, title: quiz.title, subject: quiz.subject||'', questions: quiz.questions,
+    const code = await contestCreate({ cover: quiz.cover||'', contestBg: quiz.contestBg||'', bgFade: quiz.bgFade??85, quizId: quiz.id, title: quiz.title, subject: quiz.subject||'', questions: quiz.questions,
       classId: cls?.id||'', className: cls?.name||'', startAt, endAt, password: $('#ctPass').value.trim(),
       maxAttempts: Math.max(1,Math.min(10,+$('#ctAttempts').value||1)), antiCheat: $('#ctAnti').checked, numQuestions: Math.max(0,+$('#ctNumQ').value||0), showLeaderboard: $('#ctShowBoard').checked,
       ownerUid: me?.uid||'', ownerEmail: me?.email||'', createdAt: Date.now() });
@@ -993,7 +1006,8 @@ async function renderContests(){
 }
 
 // Cổng vào phòng thi cho học sinh
-const ctBgStyle = ct => ct?.contestBg ? ` style="background-image:linear-gradient(rgba(255,255,255,.90),rgba(255,255,255,.95)),url('${ct.contestBg}');background-size:cover;background-position:center"` : '';
+const fadeBgStyle = (url, fade) => { if(!url) return ''; const f=Math.min(1,Math.max(0,((fade??85))/100)); return ` style="background-image:linear-gradient(rgba(255,255,255,${f}),rgba(255,255,255,${f})),url('${url}');background-size:cover;background-position:center"`; };
+const ctBgStyle = ct => fadeBgStyle(ct?.contestBg, ct?.bgFade);
 async function renderContestGate(code, nickname){
   const ct = await contestGet(code);
   if (!ct){ alert('Không tìm thấy phòng thi này. Em kiểm tra lại mã phòng thi nhé!'); return; }
@@ -1083,7 +1097,7 @@ function renderContestPlay(ct, nickname, attemptsBefore, avatar, saved){
     score += pts; if (correct) correctCount++;
     answers.push({choice, correct, points: pts, cheated}); saveProg();
     app.querySelectorAll('[data-ca]').forEach(b=>{ b.disabled = true; const j=+b.dataset.ca;
-      if (j===q.correct) b.style.background='#26890c';
+      if (j===q.correct) b.style.background='#86efac';
       else if (j===choice) b.style.background='#c00'; b.style.color='#fff'; });
     const fb = $('#ctFb'); if (fb) fb.innerHTML = correct ? `🎉 Đúng rồi! +${pts} điểm${cheated&&ct.antiCheat!==false?' (đã giảm 50% vì rời màn hình)':''}` : (choice<0 ? '⏰ Hết giờ câu này!' : 'Chưa đúng rồi. Đáp án đúng đã được tô xanh.');
     setTimeout(()=>{ i++; if (i>=qs.length || Date.now()>ct.endAt) finish(); else drawQ(); }, 1000);
@@ -1092,7 +1106,7 @@ function renderContestPlay(ct, nickname, attemptsBefore, avatar, saved){
     cheated = false; locked = false; qStart = Date.now(); saveProg();
     const q = qs[i], total = q.time||20, list = q.type==='tf' ? ['Đúng','Sai'] : q.answers;
     app.innerHTML = `<div class="card"${ctBgStyle(ct)}><div class="row"><span class="tag">Câu ${i+1}/${qs.length}</span><span class="tag">Điểm: ${score}</span><span class="tag" id="ctLeft">⏱️ ${total} giây</span></div>
-    <div style="background:#eee;border-radius:99px;height:10px;margin:8px 0"><div id="ctBar" style="background:#46178f;height:10px;border-radius:99px;width:100%"></div></div>
+    <div style="background:#eee;border-radius:99px;height:10px;margin:8px 0"><div id="ctBar" style="background:#a78bfa;height:10px;border-radius:99px;width:100%"></div></div>
     <div class="notice" id="ctWarn" style="display:none">⚠️ <b>Cảnh báo gian lận:</b> Em đã rời khỏi màn hình làm bài. Điểm câu này chỉ còn <b>50%</b> và lần rời màn hình sẽ hiện trong thống kê của thầy/cô.</div>
     <h2>${richHtml(q.text)}</h2>${mediaHtml(q)}
     <div class="answers">${list.map((a,j)=>`<button class="ans c${j}" data-ca="${j}">${SHAPES[j]} ${richHtml(a)}</button>`).join('')}</div>
@@ -1126,18 +1140,21 @@ async function renderContestStats(code){
 }
 
 async function renderReports(){
-  const qs=(await store.listQuizzes()).filter(q=>me?.role==='admin'||!q.ownerUid||q.ownerUid===me?.uid);
+  const myCts = (await contestList()).filter(ct=>me?.role==='admin'||!ct.ownerUid||ct.ownerUid===me?.uid).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   const sessions=(await listSessionsData()).filter(x=>me?.role==='admin'||!x.hostUid||x.hostUid===me?.uid).slice(0,10);
   app.innerHTML=`<div class="card"><h1>📊 Báo cáo</h1>
-  <h2>Kết quả các buổi chơi gần đây</h2>
+  <h2>🏆 Các cuộc thi thầy/cô đã tổ chức</h2>
+  <p class="small">Bấm vào một cuộc thi để xem bảng xếp hạng chi tiết của cuộc thi đó.</p>
+  ${myCts.length? myCts.map(ct=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(ct.title)}</b><br><span class="small">Mã phòng thi ${esc(ct.code)} • Mở: ${fmtDT(ct.startAt)} → Đóng: ${fmtDT(ct.endAt)} • Đã có <span data-repcount="${esc(ct.code)}">…</span> lượt làm bài</span></div><button class="btn" data-repstats="${esc(ct.code)}">📊 Xem bảng xếp hạng</button></div></div>`).join('') : '<p class="small">Chưa có cuộc thi nào. Thầy/cô vào mục 🏆 Cuộc thi → Gián tiếp để tạo cuộc thi nhé.</p>'}
+  <h2>▶ Các buổi chơi trực tiếp gần đây</h2>
   ${sessions.length? sessions.map(x=>`<div class="card" style="background:#fafafa"><b>${esc(x.title||'Buổi chơi')}</b> <span class="small">• Mã PIN ${esc(x.pin)} • ${x.status==='finished'?'Đã kết thúc':'Đang diễn ra'}</span>
     <table class="sortable"><tr><th>Học sinh</th><th>Điểm</th><th>Số câu đúng</th><th>⚠️ Số lần rời màn hình</th></tr>
-    ${(x.players||[]).slice().sort((a,b)=>(b.score||0)-(a.score||0)).map(pl=>`<tr><td>${esc(pl.nickname)}</td><td data-sort="${pl.score||0}">${pl.score||0}</td><td data-sort="${Object.values(pl.answers||{}).filter(a=>a.correct).length}">${Object.values(pl.answers||{}).filter(a=>a.correct).length}</td><td data-sort="${pl.cheatCount||0}">${pl.cheatCount||0}</td></tr>`).join('')||'<tr><td colspan="4">Chưa có học sinh nào.</td></tr>'}
-    </table></div>`).join('') : '<p class="small">Chưa có buổi chơi nào.</p>'}
-  <h2>Thư viện bộ câu hỏi</h2>
-  <table class="sortable"><tr><th>Bộ câu hỏi</th><th>Môn / chủ đề</th><th>Số câu</th><th>Chủ sở hữu</th></tr>
-  ${qs.map(q=>`<tr><td>${esc(q.title)}</td><td>${esc(q.subject||'')}</td><td data-sort="${q.questions.length}">${q.questions.length}</td><td>${esc(q.ownerEmail||'')}</td></tr>`).join('')}</table></div>`;
+    ${(x.players||[]).slice().sort((a,b)=>(b.score||0)-(a.score||0)).map(pl=>`<tr><td>${pl.avatar||'🙂'} ${esc(pl.nickname)}</td><td data-sort="${pl.score||0}">${pl.score||0}</td><td data-sort="${Object.values(pl.answers||{}).filter(a=>a.correct).length}">${Object.values(pl.answers||{}).filter(a=>a.correct).length}</td><td data-sort="${pl.cheatCount||0}">${pl.cheatCount||0}</td></tr>`).join('')||'<tr><td colspan="4">Chưa có học sinh nào.</td></tr>'}
+    </table></div>`).join('') : '<p class="small">Chưa có buổi chơi trực tiếp nào.</p>'}
+  </div>`;
   enableSorting(app);
+  app.querySelectorAll('[data-repstats]').forEach(b=>b.onclick=()=>renderContestStats(b.dataset.repstats));
+  myCts.forEach(async ct=>{ const el=app.querySelector(`[data-repcount="${ct.code}"]`); if(el){ const rs=await contestResults(ct.code); el.textContent=rs.length; } });
 }
 const leaderboard=(ps,m)=>`<h2>🏆 Bảng xếp hạng</h2><table class="sortable"><tr><th>Hạng</th><th>Người chơi</th><th>Điểm</th></tr>${ps.slice(0,10).map((p,i)=>`<tr ${m&&p.id===m?'style="background:#fff3cd;font-weight:800"':''}><td data-sort="${i+1}">${i+1}</td><td>${p.avatar||'🙂'} ${esc(p.nickname)} ${p.streak>=3?'🔥':''}</td><td data-sort="${p.score||0}">${p.score||0} điểm</td></tr>`).join('')}</table>`;
 const podium=ps=>{ const t=[ps[1],ps[0],ps[2]].filter(Boolean); return `<h2>👑 Bục vinh quang</h2><div class="podium">${t.map(p=>`<div class="pod"><div style="font-size:28px">${p.avatar||'🙂'}</div><div>${esc(p.nickname)}</div><div class="bar">${p.score||0}đ</div></div>`).join('')}</div>`+leaderboard(ps); };
