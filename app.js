@@ -391,9 +391,9 @@ function emptyQ(){ return {text:'',type:'quiz',answers:['','','',''],correct:0,t
 function renderCreateHub(){
   app.innerHTML=`<div class="card"><h1>➕ Tạo bộ câu hỏi</h1><p class="small">Thầy/cô chọn cách tạo bộ đề:</p>
   <div class="row" style="align-items:stretch">
-  ${can('create')?`<button class="btn grow" id="hubManual" style="padding:22px;font-size:18px">✍️<br>Tạo thủ công<br><span class="small" style="font-weight:400">Tự soạn từng câu hỏi, đáp án, media và công thức</span></button>`:''}
-  ${can('upload')?`<button class="btn grow" id="hubUpload" style="padding:22px;font-size:18px">📄<br>Tải file đề lên<br><span class="small" style="font-weight:400">File Word (.docx) với đáp án đúng in đậm</span></button>`:''}
-  ${can('ai')?`<button class="btn grow" id="hubAI" style="padding:22px;font-size:18px">🤖<br>Tạo bằng AI<br><span class="small" style="font-weight:400">Nhập chủ đề hoặc đính kèm tài liệu, AI soạn câu hỏi</span></button>`:''}
+  ${can('create')?`<button class="btn grow" id="hubManual" style="padding:22px;font-size:18px;background:#dbeafe;color:#1e3a5f;border:2px solid #93c5fd">✍️<br>Tạo thủ công<br><span class="small" style="font-weight:400">Tự soạn từng câu hỏi, đáp án, media và công thức</span></button>`:''}
+  ${can('upload')?`<button class="btn grow" id="hubUpload" style="padding:22px;font-size:18px;background:#dcfce7;color:#14532d;border:2px solid #86efac">📄<br>Tải file đề lên<br><span class="small" style="font-weight:400">File Word (.docx) với đáp án đúng in đậm</span></button>`:''}
+  ${can('ai')?`<button class="btn grow" id="hubAI" style="padding:22px;font-size:18px;background:#f3e8ff;color:#581c87;border:2px solid #d8b4fe">🤖<br>Tạo bằng AI<br><span class="small" style="font-weight:400">Nhập chủ đề hoặc đính kèm tài liệu, AI soạn câu hỏi</span></button>`:''}
   </div>${(!can('create')&&!can('upload')&&!can('ai'))?'<p class="small">Tài khoản của thầy/cô chưa được cấp quyền tạo bộ câu hỏi. Vui lòng liên hệ admin.</p>':''}</div>`;
   const m=$('#hubManual'); if(m) m.onclick=()=>renderCreate();
   const u=$('#hubUpload'); if(u) u.onclick=()=>renderImport();
@@ -403,8 +403,8 @@ function renderCreateHub(){
 function renderContestHub(){
   app.innerHTML=`<div class="card"><h1>🏆 Cuộc thi</h1><p class="small">Thầy/cô chọn hình thức tổ chức:</p>
   <div class="row" style="align-items:stretch">
-  ${can('host')?`<button class="btn grow" id="ctLive" style="padding:22px;font-size:18px">📺<br>Trực tiếp<br><span class="small" style="font-weight:400">Chế độ tổ chức chơi trực tiếp bằng mã PIN như hiện tại — vào Thư viện, chọn bộ đề rồi bấm nút Cuộc thi</span></button>`:''}
-  ${can('create')?`<button class="btn grow" id="ctAsync" style="padding:22px;font-size:18px">🕒<br>Gián tiếp<br><span class="small" style="font-weight:400">Chế độ cuộc thi theo khung giờ như hiện tại — đặt giờ mở/đóng phòng, mật mã, số lần làm lại, học sinh tự vào làm bài</span></button>`:''}
+  ${can('host')?`<button class="btn grow" id="ctLive" style="padding:22px;font-size:18px;background:#ffedd5;color:#7c2d12;border:2px solid #fdba74">📺<br>Trực tiếp<br><span class="small" style="font-weight:400">Chế độ tổ chức chơi trực tiếp bằng mã PIN như hiện tại — vào Thư viện, chọn bộ đề rồi bấm nút Cuộc thi</span></button>`:''}
+  ${can('create')?`<button class="btn grow" id="ctAsync" style="padding:22px;font-size:18px;background:#ccfbf1;color:#134e4a;border:2px solid #5eead4">🕒<br>Gián tiếp<br><span class="small" style="font-weight:400">Chế độ cuộc thi theo khung giờ như hiện tại — đặt giờ mở/đóng phòng, mật mã, số lần làm lại, học sinh tự vào làm bài</span></button>`:''}
   </div>${(!can('host')&&!can('create'))?'<p class="small">Tài khoản của thầy/cô chưa được cấp quyền tổ chức cuộc thi. Vui lòng liên hệ admin.</p>':''}</div>`;
   const l=$('#ctLive'); if(l) l.onclick=()=>renderLibrary();
   const a=$('#ctAsync'); if(a) a.onclick=()=>renderContests();
@@ -620,12 +620,15 @@ function renderAI(){
   <p class="small">Key sẽ được lưu vào kho key chung của hệ thống để dùng chung; lần sau thầy/cô không cần nhập lại.</p>
   <button class="btn green" id="doAI">✨ Tạo câu hỏi bằng AI</button> <button class="btn red" id="aiCancel" type="button" style="display:none">⏹ Huỷ tạo</button> <span id="aiStatus" class="small"></span>
   <div id="aiResult" style="margin-top:14px"></div></div>`;
-  let pastedImage = null;
+  let pastedImages = [];
+  const drawPastePrev = ()=>{ const box=$('#aiPastePrev'); if(!box) return;
+    box.innerHTML = pastedImages.length? `<p class="small">📎 Đã có <b>${pastedImages.length} ảnh</b> chụp màn hình đính kèm — xem từng ảnh bên dưới, bấm ✕ Bỏ để loại ảnh không cần:</p>` + pastedImages.map((f,i)=>`<span style="display:inline-block;text-align:center;margin:4px;vertical-align:top"><img src="${URL.createObjectURL(f)}" style="width:92px;height:68px;object-fit:cover;border-radius:8px;border:2px solid #46178f"><br><span class="small"><b>Ảnh ${i+1}</b></span> <button type="button" class="btn red" data-rmpaste="${i}" style="padding:1px 8px;font-size:12px">✕ Bỏ</button></span>`).join('') : '';
+    box.querySelectorAll('[data-rmpaste]').forEach(b=>b.onclick=()=>{ pastedImages.splice(+b.dataset.rmpaste,1); drawPastePrev(); }); };
   const savedKey = localStorage.getItem('eq_my_key')||''; if (savedKey && !$('#aiKey').value) $('#aiKey').value = savedKey;
   $('#saveKey').onclick = async()=>{ const k = $('#aiKey').value.trim(); if(!k) return alert('Thầy/cô dán API key vào ô trước rồi bấm Lưu nhé!');
     localStorage.setItem('eq_my_key', k); try{ await addKeyToPool(k, me?.email); }catch(e){}
     $('#saveKeyMsg').textContent = 'Đã lưu API key thành công ✔ Từ nay thầy/cô không cần dán lại key nữa.'; };
-  $('#aiPaste').addEventListener('paste', e=>{ const item=[...(e.clipboardData?.items||[])].find(x=>x.type.startsWith('image/')); if(item){ e.preventDefault(); pastedImage=item.getAsFile(); $('#aiPastePrev').innerHTML='<p class="small">📎 Tài liệu đính kèm: <b>Ảnh chụp màn hình dán vào (Ctrl+V)</b> ✔</p>'; } });
+  $('#aiPaste').addEventListener('paste', e=>{ const item=[...(e.clipboardData?.items||[])].find(x=>x.type.startsWith('image/')); if(item){ e.preventDefault(); pastedImages.push(item.getAsFile()); drawPastePrev(); } });
   $('#aiFile').addEventListener('change', ()=>{ const f=$('#aiFile').files[0]; $('#aiFileName').innerHTML = f? `📎 Tài liệu đính kèm: <b>${esc(f.name)}</b> (${(f.size/1024).toFixed(0)} KB)` : ''; });
   $('#doAI').onclick=async()=>{
     const topic=$('#aiTopic').value.trim(); if(!topic) return alert('Thầy/cô nhập chủ đề trước nhé!');
@@ -640,8 +643,11 @@ function renderAI(){
     drawStatus(); const statusTimer = setInterval(drawStatus, 1000);
     $('#doAI').disabled = true; $('#aiCancel').style.display = ''; $('#aiCancel').onclick = ()=>ac.abort();
     try{
-      const file = pastedImage || $('#aiFile').files[0];
-      const extra = await extractFileForAI(file);
+      const allParts=[], docNames=[];
+      const upFile = $('#aiFile').files[0];
+      if (upFile){ const e1=await extractFileForAI(upFile); allParts.push(...e1.parts); docNames.push(upFile.name); }
+      for (let k=0;k<pastedImages.length;k++){ const e2=await extractFileForAI(pastedImages[k]); allParts.push(...e2.parts); docNames.push('Ảnh chụp màn hình '+(k+1)); }
+      const extra = { parts: allParts, note: docNames.length? ' (dựa trên tài liệu: '+docNames.join(', ')+')' : '' };
       const prompt=`Hãy tạo đúng ${count} câu hỏi trắc nghiệm 4 phương án bằng TIẾNG VIỆT về chủ đề: "${topic}". Mức độ: ${$('#aiLevel').value}.
 Mỗi câu có đúng 1 đáp án đúng. Được dùng công thức dạng $...$ (LaTeX) và hóa học $\\ce{...}$ khi cần.
 Chỉ trả về JSON thuần (không markdown) dạng: {"questions":[{"text":"...","answers":["...","...","...","..."],"correct":0}]}
