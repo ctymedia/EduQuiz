@@ -163,6 +163,18 @@ function paintNav(){ document.querySelectorAll('[data-nav]').forEach(b=>{ const 
 const nameClass = u => { if(!u) return 'uname-free'; if(u.role==='admin') return 'rainbow-text'; const pl=u.plan||'free'; return pl==='ultra'?'uname-ultra':pl==='pro'?'uname-pro':pl==='custom'?'uname-custom':'uname-free'; };
 const faviconUrl = () => document.querySelector('link[rel~="icon"]')?.href || '';
 const avatarHtml = (u, sz=30) => { const a=u?.avatar; if(a && a.startsWith('data:')) return `<img class="uavatar" src="${a}" style="width:${sz}px;height:${sz}px;border:2px solid #fff;box-shadow:0 1px 4px #0003;vertical-align:middle">`; if(a) return `<span style="font-size:${Math.round(sz*0.85)}px;line-height:1;vertical-align:middle">${a}</span>`; return `<img class="uavatar" src="${faviconUrl()}" style="width:${sz}px;height:${sz}px;border:2px solid #fff;box-shadow:0 1px 4px #0003;vertical-align:middle;border-radius:8px">`; };
+function renderContact(){
+  stopListen();
+  app.innerHTML=`<div class="card join" style="max-width:480px"><h1>📞 Liên hệ tác giả</h1>
+  <p class="small">Mọi thắc mắc, góp ý về PCQuiz, thầy/cô vui lòng liên hệ tác giả:</p>
+  <div class="card" style="background:#f0fdf4;text-align:left">
+    <p>📱 <b>Số điện thoại:</b> <a href="tel:0977722961" style="font-weight:800;color:#15803d;text-decoration:none">0977 722 961</a></p>
+    <p>💬 <b>Zalo:</b> <b>0977 722 961</b></p>
+    <div class="row"><a class="btn green grow" href="tel:0977722961" style="text-align:center;text-decoration:none">📞 Gọi ngay</a><a class="btn grow" href="https://zalo.me/0977722961" target="_blank" rel="noopener" style="text-align:center;text-decoration:none;background:#0068ff">💬 Nhắn Zalo</a></div>
+  </div>
+  <button class="btn light" id="contactBack">← Về trang chủ</button></div>`;
+  $('#contactBack').onclick=()=>renderHome();
+}
 function renderProfile(){
   if(!me) return renderLogin();
   if(!can('avatar')){ alert('Tài khoản của bạn chưa được cấp quyền đổi avatar. Vui lòng liên hệ admin để được cấp quyền.'); return; }
@@ -188,10 +200,11 @@ function renderProfile(){
 }
 function paintAuth(){ const el=$('#authArea'); if(!el) return; paintNav();
   const lg0=$('#logoHome'); if(lg0){ lg0.onclick=()=>{ if(me?.role==='admin'){ stopListen(); renderAdmin('members'); } }; lg0.style.cursor = me?.role==='admin' ? 'pointer' : 'default'; lg0.title = me?.role==='admin' ? 'Bấm để mở Quản trị' : ''; }
-  el.innerHTML = me ? `<span style="position:relative;display:inline-block;text-align:left"><span style="display:inline-flex;align-items:center;gap:7px"><span id="myAvatar" ${can('avatar')?'style="cursor:pointer" title="Bấm để đổi avatar"':''}>${avatarHtml(me,30)}</span><span id="myName" class="${nameClass(me)}" style="cursor:pointer" title="Bấm để xem thông tin tài khoản">${esc(me.displayName||me.email)} ▾</span></span><span id="userMenu" style="display:none;position:absolute;right:0;top:calc(100% + 10px);background:#fff;border:2px solid #e9d5ff;border-radius:12px;box-shadow:0 12px 32px #0003;padding:12px 14px;min-width:240px;z-index:3000"><span class="small" style="display:block">Gói thành viên: <b class="${nameClass(me)}">${esc(myPlan().name)}</b></span><span class="small" style="display:block;margin-top:4px">Hạn sử dụng: <b>${me.expiresAt?fmtDate(me.expiresAt):'Không giới hạn'}</b></span>${me.role==='admin'?'<span class="small" style="display:block;margin-top:4px">Vai trò: <b>👑 Admin</b></span>':''}<button id="menuLogout" class="btn red" style="width:100%;margin-top:10px;padding:7px 10px;font-size:14px">🚪 Đăng xuất</button></span></span>`
+  el.innerHTML = me ? `<span style="position:relative;display:inline-block;text-align:left"><span style="display:inline-flex;align-items:center;gap:7px"><span id="myAvatar" ${can('avatar')?'style="cursor:pointer" title="Bấm để đổi avatar"':''}>${avatarHtml(me,30)}</span><span id="myName" class="${nameClass(me)}" style="cursor:pointer" title="Bấm để xem thông tin tài khoản">${esc(me.displayName||me.email)} ▾</span></span><span id="userMenu" style="display:none;position:absolute;right:0;top:calc(100% + 10px);background:#fff;border:2px solid #e9d5ff;border-radius:12px;box-shadow:0 12px 32px #0003;padding:12px 14px;min-width:240px;z-index:3000"><span class="small" style="display:block">Gói thành viên: <b class="${nameClass(me)}">${esc(myPlan().name)}</b></span><span class="small" style="display:block;margin-top:4px">Hạn sử dụng: <b>${me.expiresAt?fmtDate(me.expiresAt):'Không giới hạn'}</b></span>${me.role==='admin'?'<span class="small" style="display:block;margin-top:4px">Vai trò: <b>👑 Admin</b></span>':''}<button id="menuContact" class="btn light" style="width:100%;margin-top:10px;padding:7px 10px;font-size:14px">📞 Liên hệ tác giả</button><button id="menuLogout" class="btn red" style="width:100%;margin-top:10px;padding:7px 10px;font-size:14px">🚪 Đăng xuất</button></span></span>`
                     : `<button id="loginBtn">Đăng nhập</button> <button id="regBtn">Đăng ký</button>`;
   if (me){ $('#menuLogout').onclick=async()=>{ stopListen(); if(!DEMO) await A.signOut(auth); me=null; paintAuth(); renderHome(); };
     const avEl=$('#myAvatar'); if(avEl && can('avatar')) avEl.onclick=()=>renderProfile();
+    const mc=$('#menuContact'); if(mc) mc.onclick=()=>{ const m=document.getElementById('userMenu'); if(m) m.style.display='none'; renderContact(); };
     const nm=$('#myName'), um=$('#userMenu');
     if(nm&&um){ nm.onclick=e=>{ e.stopPropagation(); um.style.display = um.style.display==='none' ? 'block' : 'none'; };
       if(window.__umClose) document.removeEventListener('click', window.__umClose);
@@ -498,6 +511,7 @@ function renderCreate(prefill, title0, subject0, editId, cover0, bg0, cFade0, bF
     const cd=$('#coverDel'); if(cd) cd.onclick=()=>{ coverImg=''; $('#coverPrev').innerHTML=''; const f=$('#coverFile'); if(f) f.value=''; };
     const bd=$('#bgDel'); if(bd) bd.onclick=()=>{ bgImg=''; $('#bgPrev').innerHTML=''; const f=$('#bgFile'); if(f) f.value=''; };
     app.querySelectorAll('[data-insmedia]').forEach(b=>b.onclick=()=>{ sync(); const q=questions[+b.dataset.insmedia]; const url=q.media?.url||''; if(!url) return alert('Câu này chưa có media. Thầy/cô dán link media hoặc tải ảnh lên trước nhé!'); insertAtCursor('[media:'+url+']'); });
+    app.querySelectorAll('[data-q]').forEach(el=>{ el.addEventListener('input', sync); el.addEventListener('change', sync); });
     app.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>{ sync(); questions[+b.dataset.tf].correct=+b.dataset.v; draw(); });
     app.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ sync(); questions.splice(+b.dataset.del,1); draw(); });
     $('#addQ').onclick=()=>{ sync(); const limN=limit('maxQuestions'); if(limN>0&&questions.length>=limN) return alert(`Gói ${myPlan().name} tối đa ${limN} câu / bộ đề.`); questions.push(emptyQ()); draw(); };
@@ -511,8 +525,8 @@ function renderCreate(prefill, title0, subject0, editId, cover0, bg0, cFade0, bF
       if(el.dataset.f==='text') q.text=el.value; else if(el.dataset.f==='type') q.type=el.value; else if(el.dataset.f==='time') q.time=el.value; else if(el.dataset.f==='points') q.points=el.value;
       else if(el.dataset.f==='mtype'||el.dataset.f==='murl'){ q.media=q.media||{type:'',url:''}; if(el.dataset.f==='mtype') q.media.type=el.value; else if(!q.media.url?.startsWith('data:')) q.media.url=el.value; if(!q.media.type&&q.media.url) q.media.type='image'; }
       if(el.dataset.a!==undefined) q.answers[+el.dataset.a]=el.value; if(el.dataset.c!==undefined&&el.checked) q.correct=+el.dataset.c; });
-      app.querySelectorAll('[data-preview]').forEach(el=>{ el.textContent=questions[+el.dataset.preview]?.text||''; math(el.parentElement); });
-      app.querySelectorAll('[data-preview-a]').forEach(el=>{ const [qi,aj]=el.dataset.previewA.split('-').map(Number); el.textContent=questions[qi]?.answers?.[aj]||''; math(el.closest('.small')||el.parentElement); }); }
+      app.querySelectorAll('[data-preview]').forEach(el=>{ el.innerHTML=richHtml(questions[+el.dataset.preview]?.text||''); math(el.parentElement); });
+      app.querySelectorAll('[data-preview-a]').forEach(el=>{ const [qi,aj]=el.dataset.previewA.split('-').map(Number); el.innerHTML=richHtml(questions[qi]?.answers?.[aj]||''); math(el.closest('.small')||el.parentElement); }); }
   }; draw();
 }
 function compressImage(file, maxW){ return new Promise(res=>{ const img=new Image(); img.onload=()=>{ const max=maxW||900, sc=Math.min(1,max/Math.max(img.width,img.height));
