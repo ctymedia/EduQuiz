@@ -9,15 +9,15 @@ const ADMIN_EMAILS = ['ctymedialab@gmail.com'];
 const FEATURES = [
   ['library','Thư viện của tôi'], ['create','Tạo bộ câu hỏi'], ['host','Tổ chức chơi trực tiếp'],
   ['practice','Tự luyện tập'], ['reports','Báo cáo'], ['upload','Tải file đề (docx)'],
-  ['ai','Tạo đề bằng AI'], ['classes','Lớp học'], ['systemKeys','Dùng API key hệ thống'], ['branding','Ảnh bìa & ảnh nền cuộc thi']
+  ['ai','Tạo đề bằng AI'], ['classes','Lớp học'], ['systemKeys','Dùng API key hệ thống'], ['branding','Ảnh bìa & ảnh nền cuộc thi'], ['avatar','Đổi avatar']
 ];
 const defaultFeatures = () => Object.fromEntries(FEATURES.map(([k])=>[k,true]));
 const PLAN_DEFAULTS = {
-  free:  { name:'Free',  features:{library:1,create:1,host:1,practice:1,reports:0,upload:1,ai:0,classes:1,systemKeys:0,branding:0}, limits:{maxQuizzes:3,  maxQuestions:20,  maxClasses:1,  maxMembersPerClass:30, maxDevices:2} },
-  pro:   { name:'Pro',   features:{library:1,create:1,host:1,practice:1,reports:1,upload:1,ai:1,classes:1,systemKeys:0,branding:1}, limits:{maxQuizzes:20, maxQuestions:50,  maxClasses:5,  maxMembersPerClass:50, maxDevices:2} },
-  ultra: { name:'Ultra', features:{library:1,create:1,host:1,practice:1,reports:1,upload:1,ai:1,classes:1,systemKeys:1,branding:1}, limits:{maxQuizzes:0,  maxQuestions:0,   maxClasses:0,  maxMembersPerClass:0,  maxDevices:0} },
-  admin: { name:'Admin', features:{library:1,create:1,host:1,practice:1,reports:1,upload:1,ai:1,classes:1,systemKeys:1,branding:1}, limits:{maxQuizzes:0,  maxQuestions:0,   maxClasses:0,  maxMembersPerClass:0,  maxDevices:0} },
-  custom:{ name:'Custom',features:{library:1,create:1,host:1,practice:1,reports:0,upload:1,ai:0,classes:1,systemKeys:0,branding:0}, limits:{maxQuizzes:3,  maxQuestions:20,  maxClasses:1,  maxMembersPerClass:30, maxDevices:2} }
+  free:  { name:'Free',  features:{library:1,create:1,host:1,practice:1,reports:0,upload:1,ai:0,classes:1,systemKeys:0,branding:0,avatar:0}, limits:{maxQuizzes:3,  maxQuestions:20,  maxClasses:1,  maxMembersPerClass:30, maxDevices:2} },
+  pro:   { name:'Pro',   features:{library:1,create:1,host:1,practice:1,reports:1,upload:1,ai:1,classes:1,systemKeys:0,branding:1,avatar:1}, limits:{maxQuizzes:20, maxQuestions:50,  maxClasses:5,  maxMembersPerClass:50, maxDevices:2} },
+  ultra: { name:'Ultra', features:{library:1,create:1,host:1,practice:1,reports:1,upload:1,ai:1,classes:1,systemKeys:1,branding:1,avatar:1}, limits:{maxQuizzes:0,  maxQuestions:0,   maxClasses:0,  maxMembersPerClass:0,  maxDevices:0} },
+  admin: { name:'Admin', features:{library:1,create:1,host:1,practice:1,reports:1,upload:1,ai:1,classes:1,systemKeys:1,branding:1,avatar:1}, limits:{maxQuizzes:0,  maxQuestions:0,   maxClasses:0,  maxMembersPerClass:0,  maxDevices:0} },
+  custom:{ name:'Custom',features:{library:1,create:1,host:1,practice:1,reports:0,upload:1,ai:0,classes:1,systemKeys:0,branding:0,avatar:0}, limits:{maxQuizzes:3,  maxQuestions:20,  maxClasses:1,  maxMembersPerClass:30, maxDevices:2} }
 };
 const LIMIT_LABELS = [['maxQuizzes','Số bộ đề tối đa'],['maxQuestions','Số câu tối đa / 1 bộ đề'],['maxClasses','Số lớp được tạo'],['maxMembersPerClass','Số thành viên / 1 lớp'],['maxDevices','Số thiết bị đăng nhập tối đa / 1 tài khoản (mỗi thiết bị có 1 ID riêng, 0 = không giới hạn)']];
 
@@ -162,9 +162,11 @@ function paintNav(){ document.querySelectorAll('[data-nav]').forEach(b=>{ const 
   else { const f=NAV_FEATURES[n]; ok = f? can(f) : true; }
   b.style.display = ok? '' : 'none'; }); }
 const nameClass = u => { if(!u) return 'uname-free'; if(u.role==='admin') return 'rainbow-text'; const pl=u.plan||'free'; return pl==='ultra'?'uname-ultra':pl==='pro'?'uname-pro':pl==='custom'?'uname-custom':'uname-free'; };
-const avatarHtml = (u, sz=30) => { const a=u?.avatar; if(a && a.startsWith('data:')) return `<img class="uavatar" src="${a}" style="width:${sz}px;height:${sz}px;border:2px solid #fff;box-shadow:0 1px 4px #0003;vertical-align:middle">`; return `<span style="font-size:${Math.round(sz*0.85)}px;line-height:1;vertical-align:middle">${a||'👤'}</span>`; };
+const faviconUrl = () => document.querySelector('link[rel~="icon"]')?.href || '';
+const avatarHtml = (u, sz=30) => { const a=u?.avatar; if(a && a.startsWith('data:')) return `<img class="uavatar" src="${a}" style="width:${sz}px;height:${sz}px;border:2px solid #fff;box-shadow:0 1px 4px #0003;vertical-align:middle">`; if(a) return `<span style="font-size:${Math.round(sz*0.85)}px;line-height:1;vertical-align:middle">${a}</span>`; return `<img class="uavatar" src="${faviconUrl()}" style="width:${sz}px;height:${sz}px;border:2px solid #fff;box-shadow:0 1px 4px #0003;vertical-align:middle;border-radius:8px">`; };
 function renderProfile(){
   if(!me) return renderLogin();
+  if(!can('avatar')){ alert('Tài khoản của bạn chưa được cấp quyền đổi avatar. Vui lòng liên hệ admin để được cấp quyền.'); return; }
   stopListen();
   let av = me.avatar||'';
   app.innerHTML = `<div class="card join" style="max-width:540px"><h1>🖼️ Avatar của tôi</h1>
@@ -187,10 +189,10 @@ function renderProfile(){
 }
 function paintAuth(){ const el=$('#authArea'); if(!el) return; paintNav();
   $('#adminBtn').style.display = me?.role==='admin' ? '' : 'none';
-  el.innerHTML = me ? `<span style="display:inline-flex;align-items:center;gap:7px">${avatarHtml(me,30)}<span class="${nameClass(me)}">${esc(me.displayName||me.email)}</span></span> <button id="profileBtn">🖼️ Avatar</button> <button id="logoutBtn">Đăng xuất</button>`
+  el.innerHTML = me ? `<span style="display:inline-flex;align-items:center;gap:7px"><span id="myAvatar" ${can('avatar')?'style="cursor:pointer" title="Bấm để đổi avatar"':''}>${avatarHtml(me,30)}</span><span class="${nameClass(me)}">${esc(me.displayName||me.email)}</span></span> <button id="logoutBtn">Đăng xuất</button>`
                     : `<button id="loginBtn">Đăng nhập</button> <button id="regBtn">Đăng ký</button>`;
   if (me){ $('#logoutBtn').onclick=async()=>{ stopListen(); if(!DEMO) await A.signOut(auth); me=null; paintAuth(); renderHome(); };
-    $('#profileBtn').onclick=()=>renderProfile(); }
+    const avEl=$('#myAvatar'); if(avEl && can('avatar')) avEl.onclick=()=>renderProfile(); }
   else { $('#loginBtn').onclick=()=>renderLogin(); $('#regBtn').onclick=()=>renderRegister(); }
 }
 document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{ stopListen(); const n=b.dataset.nav;
@@ -847,9 +849,10 @@ async function renderAdminMembers(box){
       <label class="small">Hạn sử dụng:</label><input data-e="exp" type="date" value="${u.expiresAt?new Date(u.expiresAt).toISOString().slice(0,10):''}">
       <label class="small"><input type="checkbox" data-e="noexp" ${!u.expiresAt?'checked':''} style="width:auto"> Không giới hạn hạn dùng</label><br>
       <label class="small">Vai trò:</label><select data-e="role"><option value="teacher" ${u.role!=='admin'?'selected':''}>Giáo viên</option><option value="admin" ${u.role==='admin'?'selected':''}>Admin</option></select>
-      <b class="small">Chức năng được sử dụng (tùy chỉnh riêng cho thành viên này, ngoài gói):</b><br>
-      ${FEATURES.map(([k,label])=>`<label class="small"><input type="checkbox" data-e="f-${k}" ${u.features?.[k]!==false?'checked':''} style="width:auto"> ${label}</label><br>`).join('')}
+      <b class="small">Chức năng được sử dụng (mặc định theo gói, tùy chỉnh riêng cho thành viên này):</b><br>
+      ${FEATURES.map(([k,label])=>`<label class="small"><input type="checkbox" data-e="f-${k}" ${plans[u.plan||'free']?.features?.[k]?'checked':''} style="width:auto"> ${label}</label><br>`).join('')}
       <button class="btn green" data-save="${uid}">💾 Lưu thay đổi</button></div>`;
+      eb.querySelector('[data-e="plan"]').onchange=e=>{ const pf=plans[e.target.value]?.features||{}; FEATURES.forEach(([k])=>{ const c=eb.querySelector(`[data-e="f-${k}"]`); if(c) c.checked=!!pf[k]; }); };
       eb.querySelector('[data-save]').onclick=async()=>{ const features={}; FEATURES.forEach(([k])=>features[k]=eb.querySelector(`[data-e="f-${k}"]`).checked);
         const noexp=eb.querySelector('[data-e="noexp"]').checked, expVal=eb.querySelector('[data-e="exp"]').value;
         await F.updateDoc(ref,{displayName:eb.querySelector('[data-e="name"]').value.trim(), plan:eb.querySelector('[data-e="plan"]').value, role:eb.querySelector('[data-e="role"]').value, features, expiresAt:noexp?null:(expVal?new Date(expVal+'T23:59:59').getTime():null)});
