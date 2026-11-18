@@ -754,18 +754,24 @@ async function renderAdminPlans(box){
 
 // ---------- Phòng chơi (giáo viên + học sinh) ----------
 function renderHost(pin){
-  stopListen(); let players=[], session=null, timer=null, localBoard=false;
-  app.innerHTML=`<div class="card center"><h2>📺 Phòng chờ — chiếu màn hình này cho lớp xem</h2><p>Vào EduQuiz • Nhập mã PIN:</p><div class="pinbox">${pin}</div>
+  stopListen(); let players=[], session=null, timer=null, localBoard=false, advancedFor=-1;
+  app.innerHTML=`<div class="card center"><div id="lobbyHead"><h2>📺 Phòng chờ — chiếu màn hình này cho lớp xem</h2><p>Vào EduQuiz • Nhập mã PIN:</p><div class="pinbox">${pin}</div>
   ${shareRoomHtml(pin, 190)}
   <p id="pcount" class="big">Đang chờ học sinh…</p><div id="plist"></div>
   <label class="small" style="display:block;margin-top:12px"><input type="checkbox" id="antiCheat" checked style="width:auto"> ⚠️ Bật cảnh báo gian lận (học sinh rời màn hình câu hỏi: điểm câu đó chỉ còn 50%, có ghi vào báo cáo)</label>
-  <div class="row" style="justify-content:center;margin-top:14px"><button class="btn green" id="startBtn">▶ Bắt đầu trò chơi</button></div><div id="stage"></div></div>`;
+  <div class="row" style="justify-content:center;margin-top:14px"><button class="btn green" id="startBtn">▶ Bắt đầu trò chơi</button></div></div><div id="stage"></div></div>`;
   wireShareRoom(app);
   store.onSession(pin,s=>{ if(session&&s&&s.status!==session.status) localBoard=false; session=s; if(s) showStage(); });
   store.onPlayers(pin,ps=>{ players=ps.sort((a,b)=>(b.score||0)-(a.score||0)); const pc=$('#pcount'); if(!pc) return; pc.textContent=session?.status==='lobby'?`${ps.length} học sinh đã vào`:'Bảng điểm trực tiếp';
-    $('#plist').innerHTML=ps.map(p=>`<span class="player">${p.avatar||'🙂'} ${esc(p.nickname)} • ${p.score||0}đ</span>`).join(''); if(session) showStage(); });
+    $('#plist').innerHTML=ps.map(p=>`<span class="player">${p.avatar||'🙂'} ${esc(p.nickname)} • ${p.score||0}đ</span>`).join('');
+    // Tất cả học sinh đã chọn đáp án -> chuyển ngay sang màn hình đáp án/chuyển câu, không cần chờ hết giờ
+    if(session?.status==='playing' && ps.length>0 && advancedFor!==session.currentQuestion && ps.every(p=>p.answers?.[session.currentQuestion])){
+      advancedFor=session.currentQuestion; store.setSession(pin,{status:'showing_answer'}); return; }
+    if(session) showStage(); });
   $('#startBtn').onclick=async()=>{ await store.setSession(pin,{status:'playing',currentQuestion:0,questionStartedAt:Date.now(),antiCheat: $('#antiCheat')?.checked!==false}); };
-  function showStage(){ const s=session; if(!s||s.status==='lobby') return; const sb=$('#startBtn'); if(sb) sb.style.display='none'; const st=$('#stage'); if(!st) return; const q=s.questions[s.currentQuestion];
+  function showStage(){ const s=session; if(!s||s.status==='lobby') return; const sb=$('#startBtn'); if(sb) sb.style.display='none';
+    const lh=$('#lobbyHead'); if(lh) lh.style.display='none'; // Đã bắt đầu thi: ẩn hẳn giao diện phòng chờ (PIN, QR, danh sách chờ), chỉ tập trung vào màn hình câu hỏi
+    const st=$('#stage'); if(!st) return; const q=s.questions[s.currentQuestion];
     if(s.status==='finished'){ st.innerHTML=podium(players)+`<button class="btn" onclick="location.reload()">Về trang chủ</button>`; enableSorting(st); return; }
     if(s.status==='leaderboard'){ st.innerHTML=leaderboard(players)+`<button class="btn green" id="nextBtn">${s.currentQuestion+1>=s.questions.length?'🏁 Kết thúc & vinh danh':'Câu tiếp theo →'}</button>`; enableSorting(st);
       $('#nextBtn').onclick=async()=>s.currentQuestion+1>=s.questions.length?store.setSession(pin,{status:'finished'}):store.setSession(pin,{status:'playing',currentQuestion:s.currentQuestion+1,questionStartedAt:Date.now()}); return; }
