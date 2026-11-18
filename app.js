@@ -119,8 +119,10 @@ async function init(){
   await loadPlans();
   initSettings();
   A.onAuthStateChanged(auth, async user=>{
-    if (!user){ me=null; paintAuth(); renderHome(); if(!maybeDeepLink()) maybeResumeLive(); return; }
-    const snap = await F.getDoc(F.doc(db,'users',user.uid));
+    if (!user){ me=null; paintAuth(); if (window.__regMsg){ const m=window.__regMsg; window.__regMsg=null; renderLogin(m); return; } renderHome(); if(!maybeDeepLink()) maybeResumeLive(); return; }
+    if (window.__registering) return;
+    let snap = await F.getDoc(F.doc(db,'users',user.uid));
+    if (!snap.exists()){ await new Promise(r=>setTimeout(r,1500)); snap = await F.getDoc(F.doc(db,'users',user.uid)); }
     if (!snap.exists()){ await A.signOut(auth); me=null; paintAuth(); alert('Tài khoản này chưa có hồ sơ hoặc đã bị xoá bởi admin. Vui lòng đăng ký lại và chờ phê duyệt.'); renderHome(); return; }
     me = { uid:user.uid, ...snap.data() };
     const chk = checkAccess(me);
@@ -130,7 +132,9 @@ async function init(){
       if (!fd.match && fd.count >= devLimit){ await A.signOut(auth); me=null; paintAuth(); alert(`Tài khoản này đã đăng nhập trên tối đa ${devLimit} thiết bị (giới hạn của gói ${myPlan().name}, mỗi thiết bị được nhận diện bằng một ID riêng). Thầy/cô hãy đăng xuất ở một thiết bị cũ, hoặc liên hệ admin để nâng giới hạn nhé.`); renderHome(); return; } }
     await F.updateDoc(F.doc(db,'users',user.uid), { lastLoginAt: Date.now() });
     await registerDevice(me.uid);
-    paintAuth(); if (me.forcePwChange){ renderChangePassword(true); return; } renderHome(); if(!maybeDeepLink()) maybeResumeLive();
+    paintAuth();
+    if (!me.forcePwChange){ try{ const mk=await F.getDoc(F.doc(db,'plans','pwreset_'+(me.email||'').toLowerCase().replace(/[^a-z0-9]/g,'_'))); if (mk.exists()){ await F.updateDoc(F.doc(db,'users',user.uid),{forcePwChange:true}); me.forcePwChange=true; F.deleteDoc(mk.ref).catch(()=>{}); } }catch{} }
+    if (me.forcePwChange){ renderChangePassword(true); return; } renderHome(); if(!maybeDeepLink()) maybeResumeLive();
   });
   renderHome();
 }
@@ -180,7 +184,7 @@ function renderChangePassword(forced){
   if(!me) return renderLogin();
   stopListen();
   app.innerHTML=`<div class="card join" style="max-width:460px"><h1>🔑 Đổi mật khẩu</h1>
-  ${forced?'<div class="notice">Admin đã reset mật khẩu cho tài khoản của thầy/cô. Vui lòng đặt mật khẩu mới (khác mật khẩu cũ) để tiếp tục sử dụng.</div>':''}
+  ${forced?'<div class="notice">Mật khẩu của thầy/cô vừa được đặt lại (qua email hoặc bởi admin). Vui lòng đặt mật khẩu mới (khác mật khẩu cũ) để tiếp tục sử dụng.</div>':''}
   <input id="pwCur" type="password" placeholder="Mật khẩu hiện tại">
   <input id="pwNew" type="password" placeholder="Mật khẩu mới (ít nhất 6 ký tự)">
   <input id="pwNew2" type="password" placeholder="Nhập lại mật khẩu mới">
@@ -271,27 +275,36 @@ function renderRegister(msg){
     if (devDoc.exists() || (ipDoc && ipDoc.exists())){
       app.innerHTML=`<div class="card join"><h1>⚠️ Đăng ký thất bại</h1><div class="notice">Hệ thống nghi ngờ bạn Spam tài khoản, quá trình đăng ký thất bại.</div><p class="small">Mỗi thiết bị / địa chỉ IP chỉ được đăng ký 01 tài khoản. Nếu thầy/cô cho rằng đây là nhầm lẫn, vui lòng liên hệ tác giả để được hỗ trợ:</p><button class="btn green" style="width:100%" id="spamContact">📞 Liên hệ tác giả</button><p class="small"><a href="#" id="spamHome">← Về trang chủ</a></p></div>`;
       $('#spamContact').onclick=()=>renderContact(); $('#spamHome').onclick=e=>{e.preventDefault();renderHome();}; return; }
+    window.__registering=true;
     try{ const cred=await A.createUserWithEmailAndPassword(auth,email,pass);
       const admins=await F.getDocs(F.query(F.collection(db,'users'),F.where('role','==','admin'),F.limit(1)));
       const isFirstAdmin = admins.empty || ADMIN_EMAILS.includes(email.toLowerCase());
       await F.setDoc(F.doc(db,'users',cred.user.uid),{ email, displayName:name, role:isFirstAdmin?'admin':'teacher', status:(isFirstAdmin||st2.regFree)?'approved':'pending',
         plan:'free', features:defaultFeatures(), expiresAt:isFirstAdmin?null:Date.now()+365*24*3600*1000, createdAt:Date.now(), lastLoginAt:0 });
       try{ await F.setDoc(F.doc(db,'plans','regdev_'+devId),{ email, ip, at:Date.now() }); if(ipKey) await F.setDoc(F.doc(db,'plans',ipKey),{ email, device:devId, at:Date.now() }); }catch{}
+      window.__regMsg = (isFirstAdmin?'Đăng ký thành công! Đây là tài khoản admin đầu tiên nên đã được duyệt sẵn — thầy/cô đăng nhập luôn nhé.':(st2.regFree?'Đăng ký thành công! Hệ thống đang mở đăng ký tự do nên tài khoản dùng được ngay với gói Free — thầy/cô đăng nhập luôn nhé.':'Đăng ký thành công! Tài khoản đang chờ admin phê duyệt. Khi được duyệt, tài khoản tự động dùng gói Free.'));
+      window.__registering=false;
       await A.signOut(auth);
-      renderLogin(isFirstAdmin?'Đăng ký thành công! Đây là tài khoản admin đầu tiên nên đã được duyệt sẵn — thầy/cô đăng nhập luôn nhé.':(st2.regFree?'Đăng ký thành công! Hệ thống đang mở đăng ký tự do nên tài khoản dùng được ngay với gói Free — thầy/cô đăng nhập luôn nhé.':'Đăng ký thành công! Tài khoản đang chờ admin phê duyệt. Khi được duyệt, tài khoản tự động dùng gói Free.'));
-    }catch(e){ alert('Đăng ký chưa được: '+(e.code==='auth/email-already-in-use'?'Email này đã được đăng ký.':e.message)); } };
+      if (window.__regMsg){ const m=window.__regMsg; window.__regMsg=null; renderLogin(m); }
+    }catch(e){ window.__registering=false; alert('Đăng ký chưa được: '+(e.code==='auth/email-already-in-use'?'Email này đã được đăng ký.':e.message)); } };
 }
 function renderLogin(msg){
   app.innerHTML=`<div class="card join"><h1>🔐 Đăng nhập</h1>${msg?`<div class="notice">${esc(msg)}</div>`:''}
   <input id="le" type="email" placeholder="Email"><input id="lp" type="password" placeholder="Mật khẩu">
   <button class="btn green" style="width:100%" id="doLogin">Đăng nhập</button>
   <button class="btn light" style="width:100%;margin-top:8px" id="forgotBtn">🔑 Quên mật khẩu</button>
-  <div id="forgotBox" style="display:none;margin-top:10px"><div class="notice">Nếu quên mật khẩu, thầy/cô vui lòng liên hệ tác giả để được hỗ trợ cấp lại mật khẩu.</div><button class="btn green" style="width:100%" id="forgotContact">📞 Liên hệ tác giả</button></div>
+  <div id="forgotBox" style="display:none;margin-top:10px"><div class="notice">Nhập email tài khoản — hệ thống sẽ gửi <b>email đặt lại mật khẩu chính thức của Firebase</b> tới địa chỉ đó. Sau khi đặt lại mật khẩu qua email và đăng nhập lại, hệ thống sẽ yêu cầu thầy/cô <b>đổi mật khẩu mới ngay trong ứng dụng</b> mới dùng tiếp được.</div><input id="fe" type="email" placeholder="Email tài khoản"><button class="btn green" style="width:100%" id="forgotSend">📧 Gửi email đặt lại mật khẩu</button><p class="small" id="forgotMsg"></p><p class="small">Không nhận được email? Kiểm tra hộp thư rác, hoặc <a href="#" id="forgotContact">liên hệ tác giả</a>.</p></div>
   <p class="small">Chưa có tài khoản? <a href="#" id="goReg">Đăng ký</a> (cần admin phê duyệt)</p>
   <p class="small">Học sinh không cần tài khoản — nhập mã PIN ở Trang chủ để vào chơi.</p></div>`;
   $('#goReg').onclick=e=>{e.preventDefault();renderRegister();};
-  $('#forgotBtn').onclick=()=>{ $('#forgotBox').style.display='block'; };
-  $('#forgotContact').onclick=()=>renderContact();
+  $('#forgotBtn').onclick=()=>{ $('#forgotBox').style.display='block'; $('#fe').value=$('#le').value; };
+  $('#forgotContact').onclick=e=>{e.preventDefault();renderContact();};
+  $('#forgotSend').onclick=async()=>{ const email=($('#fe').value.trim()||$('#le').value.trim()); if(!email) return alert('Thầy/cô nhập email tài khoản nhé!');
+    if(DEMO) return alert('Bản demo chưa nối Firebase.');
+    try{ await A.sendPasswordResetEmail(auth,email);
+      try{ await F.setDoc(F.doc(db,'plans','pwreset_'+email.toLowerCase().replace(/[^a-z0-9]/g,'_')), { email, at:Date.now() }); }catch{}
+      $('#forgotMsg').textContent='✔ Đã gửi email đặt lại mật khẩu tới '+email+'. Thầy/cô mở email và bấm vào liên kết trong thư để đặt lại mật khẩu nhé.';
+    }catch(e){ alert('Chưa gửi được email: '+(e.code==='auth/user-not-found'?'Email này chưa được đăng ký.':e.message)); } };
   $('#doLogin').onclick=async()=>{ const email=$('#le').value.trim(), pass=$('#lp').value;
     if(!email||!pass) return alert('Thầy/cô nhập email và mật khẩu nhé!'); if(DEMO) return alert('Bản demo chưa nối Firebase.');
     try{ await A.signInWithEmailAndPassword(auth,email,pass); }
