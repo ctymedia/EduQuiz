@@ -104,7 +104,7 @@ function checkAccess(p){
 
 // ---------- Khởi tạo ----------
 async function init(){
-  if (DEMO){ $('#syncStatus').textContent='⚠️ Chế độ demo (chưa nối Firebase)'; me={uid:'demo',email:'demo@eduquiz.local',displayName:'Giáo viên demo',role:'admin',status:'approved',plan:'ultra',features:defaultFeatures(),expiresAt:null}; paintAuth(); renderHome(); maybeDeepLink(); return; }
+  if (DEMO){ $('#syncStatus').textContent='⚠️ Chế độ demo (chưa nối Firebase)'; me={uid:'demo',email:'demo@eduquiz.local',displayName:'Giáo viên demo',role:'admin',status:'approved',plan:'ultra',features:defaultFeatures(),expiresAt:null}; paintAuth(); renderHome(); if(!maybeDeepLink()) maybeResumeLive(); return; }
   const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
   F = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
   A = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
@@ -112,7 +112,7 @@ async function init(){
   $('#syncStatus').textContent='☁️ Đã nối Firebase — đồng bộ mọi thiết bị';
   await loadPlans();
   A.onAuthStateChanged(auth, async user=>{
-    if (!user){ me=null; paintAuth(); renderHome(); maybeDeepLink(); return; }
+    if (!user){ me=null; paintAuth(); renderHome(); if(!maybeDeepLink()) maybeResumeLive(); return; }
     const snap = await F.getDoc(F.doc(db,'users',user.uid));
     if (!snap.exists()){ await A.signOut(auth); me=null; paintAuth(); alert('Tài khoản này chưa có hồ sơ hoặc đã bị xoá bởi admin. Vui lòng đăng ký lại và chờ phê duyệt.'); renderHome(); return; }
     me = { uid:user.uid, ...snap.data() };
@@ -120,7 +120,7 @@ async function init(){
     if (chk!==true){ await A.signOut(auth); me=null; paintAuth(); alert(chk); renderHome(); return; }
     await F.updateDoc(F.doc(db,'users',user.uid), { lastLoginAt: Date.now() });
     await registerDevice(me.uid);
-    paintAuth(); renderHome(); maybeDeepLink();
+    paintAuth(); renderHome(); if(!maybeDeepLink()) maybeResumeLive();
   });
   renderHome();
 }
@@ -284,12 +284,28 @@ async function enterRoomByCode(code){
 }
 // Mở liên kết ?code=... là tự vào phòng ngay (chỉ xử lý 1 lần khi trang vừa tải)
 function maybeDeepLink(){
-  if (window.__eqDlDone) return;
+  if (window.__eqDlDone) return false;
   const code = extractRoomCode(location.href);
-  if (!code) return;
+  if (!code) return false;
   window.__eqDlDone = true;
   try{ history.replaceState(null,'',location.pathname); }catch{}
   enterRoomByCode(code);
+  return true;
+}
+// Học sinh lỡ tải lại trang khi đang chơi trực tiếp: tự vào lại đúng phòng, đúng tài khoản người chơi cũ (chỉ xử lý 1 lần khi trang vừa tải)
+async function maybeResumeLive(){
+  if (window.__eqResumeDone) return; window.__eqResumeDone = true;
+  let saved = null;
+  try{ saved = JSON.parse(localStorage.getItem('eq_resume_live')||'null'); }catch{}
+  if (!saved?.pin || !saved?.playerId) return;
+  if (Date.now() - (saved.at||0) > 6*3600*1000){ try{ localStorage.removeItem('eq_resume_live'); }catch{} return; }
+  try{
+    const s = await store.getSession(saved.pin);
+    if (!s || s.status==='finished'){ try{ localStorage.removeItem('eq_resume_live'); }catch{} return; }
+    const ps = await store.listPlayers(saved.pin);
+    if (!ps.some(p=>p.id===saved.playerId)){ try{ localStorage.removeItem('eq_resume_live'); }catch{} return; }
+    renderPlayer(saved.pin, saved.playerId);
+  }catch{}
 }
 
 // Man hinh nhap biet danh + chon avatar cho phong choi truc tiep (PIN)
@@ -300,7 +316,9 @@ function renderJoinSetup(pin){
   <button class="btn green" style="width:100%;margin-top:14px" id="readyBtn">✔ Sẵn sàng</button></div>`;
   const getAv = wireAvatarPicker('avPick');
   $('#readyBtn').onclick = async()=>{ const nick = $('#jnick').value.trim(); if(!nick) return alert('Em nhập biệt danh trước nhé!');
-    renderPlayer(pin, await store.join(pin, nick, getAv())); };
+    const pid = await store.join(pin, nick, getAv());
+    try{ localStorage.setItem('eq_resume_live', JSON.stringify({ pin, playerId: pid, nick, at: Date.now() })); }catch{}
+    renderPlayer(pin, pid); };
 }
 function renderHome(){
   app.innerHTML=`${DEMO?'<div class="notice"><b>Đang ở chế độ demo.</b></div>':''}
@@ -752,37 +770,57 @@ function renderHost(pin){
     if(s.status==='leaderboard'){ st.innerHTML=leaderboard(players)+`<button class="btn green" id="nextBtn">${s.currentQuestion+1>=s.questions.length?'🏁 Kết thúc & vinh danh':'Câu tiếp theo →'}</button>`; enableSorting(st);
       $('#nextBtn').onclick=async()=>s.currentQuestion+1>=s.questions.length?store.setSession(pin,{status:'finished'}):store.setSession(pin,{status:'playing',currentQuestion:s.currentQuestion+1,questionStartedAt:Date.now()}); return; }
     if(s.status==='showing_answer'){ const counts=[0,0,0,0]; players.forEach(p=>{ const a=p.answers?.[s.currentQuestion]; if(a) counts[a.choice]++; });
-      st.innerHTML=`<h2>Đáp án đúng: ${SHAPES[q.correct]} ${richHtml(q.answers[q.correct])}</h2>${mediaHtml(q)}<p>${counts.map((c,i)=>`${SHAPES[i]}: ${c} bạn`).join(' • ')}</p><p class="small">${players.filter(p=>p.answers?.[s.currentQuestion]?.correct).length}/${players.length} bạn trả lời đúng</p><button class="btn" id="lbBtn">🏆 Xem xếp hạng →</button>`; math(st);
-      $('#lbBtn').onclick=()=>store.setSession(pin,{status:'leaderboard'}); return; }
+      const isLast = s.currentQuestion+1>=s.questions.length;
+      st.innerHTML=`<h2>Đáp án đúng: ${SHAPES[q.correct]} ${richHtml(q.answers[q.correct])}</h2>${mediaHtml(q)}<p>${counts.map((c,i)=>`${SHAPES[i]}: ${c} bạn`).join(' • ')}</p><p class="small">${players.filter(p=>p.answers?.[s.currentQuestion]?.correct).length}/${players.length} bạn trả lời đúng</p>
+      <div class="row" style="justify-content:center;margin-top:12px"><button class="btn light" id="lbBtn">🏆 Xem xếp hạng</button><button class="btn green" id="nextQBtn">${isLast?'🏁 Kết thúc & vinh danh':'Câu tiếp theo →'}</button></div>
+      <p class="small">Xem xếp hạng là không bắt buộc — thầy/cô có thể bấm thẳng “${isLast?'Kết thúc & vinh danh':'Câu tiếp theo'}” để đi tiếp.</p>`; math(st);
+      $('#lbBtn').onclick=()=>store.setSession(pin,{status:'leaderboard'});
+      $('#nextQBtn').onclick=async()=>isLast?store.setSession(pin,{status:'finished'}):store.setSession(pin,{status:'playing',currentQuestion:s.currentQuestion+1,questionStartedAt:Date.now()}); return; }
     if(localBoard){ st.innerHTML=leaderboard(players)+`<button class="btn" id="backQ">← Quay lại câu hỏi</button>`; enableSorting(st); $('#backQ').onclick=()=>{ localBoard=false; showStage(); }; return; }
     const remain=Math.max(0,q.time-Math.floor((Date.now()-(s.questionStartedAt||Date.now()))/1000));
-    st.innerHTML=`<p class="badge">Câu ${s.currentQuestion+1}/${s.questions.length}</p><h2>${richHtml(q.text)}</h2>${mediaHtml(q)}<div class="timer"><i style="width:${remain/q.time*100}%"></i></div><p class="small">Còn ${remain} giây • ${players.filter(p=>p.answers?.[s.currentQuestion]).length}/${players.length} bạn đã trả lời</p>
+    // Khi câu hỏi đang hiện và đồng hồ đang chạy: KHÔNG hiện menu xem xếp hạng / hiện đáp án — menu chỉ hiện khi câu kết thúc (màn hình đáp án)
+    st.innerHTML=`<p class="badge">Câu ${s.currentQuestion+1}/${s.questions.length}</p><h2>${richHtml(q.text)}</h2>${mediaHtml(q)}<div class="timer"><i id="hostBar" style="width:${remain/q.time*100}%"></i></div><p class="small">⏱️ Còn <b id="hostLeft">${remain}</b> giây • ${players.filter(p=>p.answers?.[s.currentQuestion]).length}/${players.length} bạn đã trả lời</p>
     <div class="answers">${(q.type==='tf'?['Đúng','Sai']:q.answers).map((a,i)=>`<button class="ans ${COLORS[i]}"><span class="shape">${SHAPES[i]}</span>${richHtml(a)}</button>`).join('')}</div>
-    <p class="small">Điểm câu này: <b>${q.points} điểm</b> • Tính theo tốc độ trả lời: điểm nhận = điểm câu × (1 − thời gian trả lời ÷ (2 × thời gian của câu)) — trả lời đúng càng nhanh càng nhiều điểm${s.antiCheat?' • ⚠️ Đang bật cảnh báo gian lận':''}</p>
-    <div class="row" style="margin-top:14px;justify-content:center"><button class="btn light" id="viewBoard">🏆 Xem xếp hạng</button><button class="btn red" id="showAns">Hiện đáp án</button></div>`; math(st);
-    $('#viewBoard').onclick=()=>{ localBoard=true; showStage(); };
-    $('#showAns').onclick=()=>store.setSession(pin,{status:'showing_answer'});
-    clearInterval(timer); timer=setInterval(()=>{ const r=Math.max(0,q.time-Math.floor((Date.now()-(s.questionStartedAt||Date.now()))/1000)); if(r<=0){ clearInterval(timer); store.setSession(pin,{status:'showing_answer'}); } },1000);
+    <p class="small">Điểm câu này: <b>${q.points} điểm</b> • Tính theo tốc độ trả lời: điểm nhận = điểm câu × (1 − thời gian trả lời ÷ (2 × thời gian của câu)) — trả lời đúng càng nhanh càng nhiều điểm${s.antiCheat?' • ⚠️ Đang bật cảnh báo gian lận':''}</p>`; math(st);
+    clearInterval(timer); timer=setInterval(()=>{ const r=Math.max(0,q.time-Math.floor((Date.now()-(s.questionStartedAt||Date.now()))/1000));
+      const el=$('#hostLeft'), bar=$('#hostBar'); if(!el){ clearInterval(timer); return; }
+      el.textContent=r; if(bar) bar.style.width=(r/q.time*100)+'%';
+      if(r<=0){ clearInterval(timer); store.setSession(pin,{status:'showing_answer'}); } },250);
   }
 }
 function renderPlayer(pin, playerId){
-  stopListen(); let answeredFor=-1, cheatedQ=-1, curSession=null;
+  stopListen(); let answeredFor=-1, cheatedQ=-1, curSession=null, pTimer=null, checkedFor=-1;
   const onLeave=async()=>{ const ss=curSession; if(!ss||ss.status!=='playing'||!ss.antiCheat) return; if(answeredFor===ss.currentQuestion||cheatedQ===ss.currentQuestion) return;
     cheatedQ=ss.currentQuestion; await store.flagCheat(pin,playerId,ss.currentQuestion);
     const st=$('#pstage'); if(st&&!st.querySelector('.cheatwarn')) st.insertAdjacentHTML('afterbegin','<div class="notice cheatwarn">⚠️ <b>Cảnh báo gian lận:</b> Em đã rời khỏi màn hình câu hỏi. Điểm của câu này chỉ còn <b>50%</b> và lần rời màn hình này sẽ hiện trong báo cáo của thầy/cô.</div>'); };
   document.addEventListener('visibilitychange', ()=>{ if(document.hidden) onLeave(); });
   window.addEventListener('blur', onLeave);
   app.innerHTML=`<div class="card center" id="pstage"><h2>Đã vào phòng!</h2><p>Nhìn lên màn hình của thầy/cô và chờ câu hỏi nhé…</p></div>`;
-  store.onSession(pin,s=>{ if(!s) return; curSession=s; const st=$('#pstage'); if(!st) return;
+  store.onSession(pin,async s=>{ if(!s) return; curSession=s; clearInterval(pTimer); const st=$('#pstage'); if(!st) return;
     if(s.status==='lobby'){ st.innerHTML=`<h2>✅ Đã vào phòng chờ</h2><p>Chờ thầy/cô bấm Bắt đầu…</p>`; return; }
-    if(s.status==='finished'){ store.listPlayers(pin).then(ps=>{ const m=ps.find(p=>p.id===playerId); const rank=ps.sort((a,b)=>b.score-a.score).findIndex(p=>p.id===playerId)+1; st.innerHTML=`<h2>🏁 Trò chơi kết thúc!</h2><p class="big">Em xếp hạng ${rank} • ${m?.score||0} điểm</p>`+podium(ps); enableSorting(st); }); return; }
+    if(s.status==='finished'){ try{ localStorage.removeItem('eq_resume_live'); }catch{} store.listPlayers(pin).then(ps=>{ const m=ps.find(p=>p.id===playerId); const rank=ps.sort((a,b)=>b.score-a.score).findIndex(p=>p.id===playerId)+1; st.innerHTML=`<h2>🏁 Trò chơi kết thúc!</h2><p class="big">Em xếp hạng ${rank} • ${m?.score||0} điểm</p>`+podium(ps); enableSorting(st); }); return; }
     if(s.status==='leaderboard'||s.status==='showing_answer'){ store.listPlayers(pin).then(ps=>{ const m=ps.find(p=>p.id===playerId); const a=m?.answers?.[s.currentQuestion];
       st.innerHTML = s.status==='showing_answer' ? (a?(a.correct?`<h2>🎉 Đúng rồi! +${a.points} điểm</h2>`:`<h2>Chưa đúng rồi, cố lên câu sau nhé!</h2>`):`<h2>Hết giờ! Em chưa trả lời câu này.</h2>`) : leaderboard(ps,playerId); enableSorting(st); }); return; }
-    const q=s.questions[s.currentQuestion]; if(answeredFor===s.currentQuestion){ st.innerHTML=`<h2>✔ Đã trả lời!</h2><p>Chờ các bạn khác…</p>`; return; }
-    st.innerHTML=`<p class="badge">Câu ${s.currentQuestion+1}/${s.questions.length} • ${q.time} giây</p><h2>${richHtml(q.text)}</h2>${mediaHtml(q)}<div class="answers">${(q.type==='tf'?['Đúng','Sai']:q.answers).map((a,i)=>`<button class="ans ${COLORS[i]}" data-a="${i}"><span class="shape">${SHAPES[i]}</span>${richHtml(a)}</button>`).join('')}</div>`; math(st);
+    const q=s.questions[s.currentQuestion];
+    // Sau khi tải lại trang: đọc lại đáp án đã lưu trên hệ thống để biết câu này em đã trả lời chưa, tránh trả lời 2 lần
+    if(checkedFor!==s.currentQuestion){ const qIdx=s.currentQuestion; checkedFor=qIdx;
+      try{ const ps=await store.listPlayers(pin); const meP=ps.find(p=>p.id===playerId);
+        if(meP?.answers?.[qIdx]) answeredFor=qIdx;
+        if(meP?.cheats?.[qIdx]) cheatedQ=qIdx;
+      }catch{}
+      if(!curSession || curSession.status!=='playing' || curSession.currentQuestion!==qIdx) return; }
+    if(answeredFor===s.currentQuestion){ st.innerHTML=`<h2>✔ Đã trả lời!</h2><p>Chờ các bạn khác…</p>`; return; }
+    const remain0=Math.max(0,q.time-Math.floor((Date.now()-(s.questionStartedAt||Date.now()))/1000));
+    st.innerHTML=`<p class="badge">Câu ${s.currentQuestion+1}/${s.questions.length}</p> <span class="badge" id="pLeft" style="background:#e21b3c">⏱️ ${remain0} giây</span>
+    <div style="background:#eee;border-radius:99px;height:10px;margin:8px 0"><div id="pBar" style="background:#e21b3c;height:10px;border-radius:99px;width:${remain0/q.time*100}%"></div></div>
+    <h2>${richHtml(q.text)}</h2>${mediaHtml(q)}<div class="answers">${(q.type==='tf'?['Đúng','Sai']:q.answers).map((a,i)=>`<button class="ans ${COLORS[i]}" data-a="${i}"><span class="shape">${SHAPES[i]}</span>${richHtml(a)}</button>`).join('')}</div>`; math(st);
+    clearInterval(pTimer); pTimer=setInterval(()=>{ const left=Math.max(0,q.time-Math.floor((Date.now()-(s.questionStartedAt||Date.now()))/1000));
+      const el=$('#pLeft'), bar=$('#pBar'); if(!el){ clearInterval(pTimer); return; }
+      el.textContent='⏱️ '+left+' giây'; if(bar) bar.style.width=(left/q.time*100)+'%';
+      if(left<=0){ clearInterval(pTimer); el.textContent='⏱️ Hết giờ — chờ thầy/cô công bố đáp án…'; st.querySelectorAll('[data-a]').forEach(b=>b.disabled=true); } },250);
     st.querySelectorAll('[data-a]').forEach(b=>b.onclick=async()=>{ const choice=+b.dataset.a; const elapsed=Date.now()-(s.questionStartedAt||Date.now());
       const correct=choice===q.correct; let points=correct?Math.round(q.points*(1-Math.min(elapsed/(q.time*1000),1)/2)):0; if(correct&&cheatedQ===s.currentQuestion) points=Math.round(points*0.5);
-      answeredFor=s.currentQuestion; await store.answer(pin,playerId,s.currentQuestion,choice,points,correct); st.innerHTML=`<h2>✔ Đã trả lời!</h2><p>Chờ các bạn khác…</p>`; });
+      answeredFor=s.currentQuestion; clearInterval(pTimer); await store.answer(pin,playerId,s.currentQuestion,choice,points,correct); st.innerHTML=`<h2>✔ Đã trả lời!</h2><p>Chờ các bạn khác…</p>`; });
   });
 }
 async function renderPractice(quiz){ let i=0, score=0, qStart=Date.now(); const step=()=>{ qStart=Date.now(); if(i>=quiz.questions.length){ app.innerHTML=`<div class="card center"><h1>🏁 Hoàn thành!</h1><p class="big">Điểm của em: ${score}</p><button class="btn" onclick="location.reload()">Về trang chủ</button></div>`; return; }
@@ -871,6 +909,7 @@ async function renderContestGate(code, nickname){
   const now = Date.now(), open = now>=ct.startAt && now<=ct.endAt;
   app.innerHTML = `<div class="card join"><h1>🏆 ${esc(ct.title)}</h1>
   <p class="small">${ct.className?`Lớp: <b>${esc(ct.className)}</b> • `:''}${ct.numQuestions>0?`Thi ${ct.numQuestions} câu (chọn ngẫu nhiên từ ${ct.questions.length} câu của bộ đề)`:ct.questions.length+' câu hỏi'} • Mỗi em được làm tối đa <b>${ct.maxAttempts||1} lần</b><br>Khung giờ thi: từ <b>${fmtDT(ct.startAt)}</b> đến <b>${fmtDT(ct.endAt)}</b></p>
+  <div id="ctResume"></div>
   ${open? `<input id="gNick" placeholder="Họ tên của em" value="${esc(nickname||'')}">
   <p class="small" style="text-align:left;margin:10px 0 4px"><b>Chọn avatar:</b></p>${avatarPickerHtml('gAvPick')}
   ${ct.password?'<input id="gPass" type="password" placeholder="Mật mã phòng thi">':''}
@@ -880,10 +919,22 @@ async function renderContestGate(code, nickname){
   <button class="btn" style="width:100%" onclick="location.reload()">← Về trang chủ</button>`}</div>`;
   if (!open) return;
   const getGAv = wireAvatarPicker('gAvPick');
+  // Có bài làm dở đã lưu trên máy này (lỡ tải lại trang) thì cho làm tiếp, không mất bài và không tốn thêm lượt làm
+  let savedCt = null;
+  try{ savedCt = JSON.parse(localStorage.getItem('eq_resume_contest')||'null'); }catch{}
+  if (savedCt && savedCt.code===ct.code && savedCt.qs?.length){
+    const box = $('#ctResume'), doneN = (savedCt.answers||[]).length;
+    if (box) box.innerHTML = `<div class="notice">▶ <b>${esc(savedCt.nickname)}</b> đang làm dở bài thi này (đã làm ${doneN}/${savedCt.qs.length} câu, ${savedCt.score||0} điểm) — có phải em vừa tải lại trang không?<br>
+    <button class="btn green" id="ctResumeBtn" style="margin-top:8px">↪ Tiếp tục làm bài</button> <button class="btn light" id="ctDiscardBtn" style="margin-top:8px">Bỏ bài làm dở</button></div>`;
+    $('#gNick').value = savedCt.nickname||'';
+    const rb = $('#ctResumeBtn'); if (rb) rb.onclick = ()=>renderContestPlay(ct, savedCt.nickname, savedCt.attemptsBefore||0, savedCt.avatar, savedCt);
+    const db2 = $('#ctDiscardBtn'); if (db2) db2.onclick = ()=>{ try{ localStorage.removeItem('eq_resume_contest'); }catch{} savedCt = null; if (box) box.innerHTML=''; };
+  }
   $('#gStart').onclick = async()=>{
     const nick = $('#gNick').value.trim(); if(!nick) return alert('Em nhập họ tên trước nhé!');
     if (ct.password && $('#gPass').value.trim() !== ct.password) return alert('Mật mã phòng thi chưa đúng. Em hỏi lại thầy/cô nhé!');
     const nameKey = nick.toLowerCase();
+    if (savedCt && savedCt.code===ct.code && nameKey===String(savedCt.nickname||'').trim().toLowerCase() && savedCt.qs?.length) return renderContestPlay(ct, savedCt.nickname, savedCt.attemptsBefore||0, savedCt.avatar, savedCt);
     const done = (await contestResults(ct.code)).filter(r=>r.nameKey===nameKey).length;
     const localDone = +(localStorage.getItem('eq_ctatt_'+ct.code+'_'+nameKey)||0);
     const used = Math.max(done, localDone);
@@ -894,15 +945,20 @@ async function renderContestGate(code, nickname){
 }
 
 // Học sinh làm bài thi: tự chuyển câu, tính điểm theo tốc độ, chống gian lận
-function renderContestPlay(ct, nickname, attemptsBefore, avatar){
+function renderContestPlay(ct, nickname, attemptsBefore, avatar, saved){
   stopListen();
-  const pool = shuffleArr(ct.questions).slice(0, ct.numQuestions>0 ? Math.min(ct.numQuestions, ct.questions.length) : ct.questions.length);
-  const qs = pool.map(q=>{ if (q.type==='tf' || !Array.isArray(q.answers) || q.answers.length<2) return q;
-    const idxs = shuffleArr(q.answers.map((_,j)=>j));
-    return {...q, answers: idxs.map(j=>q.answers[j]), correct: idxs.indexOf(q.correct)}; });
-  const nameKey = nickname.trim().toLowerCase(), startedAt = Date.now();
-  let i=0, score=0, correctCount=0, cheatCount=0, finished=false, locked=false, cheated=false, qStart=0, timerInt=null;
-  const answers = [];
+  // Có tiến trình đã lưu (học sinh lỡ tải lại trang) thì làm tiếp đúng bài đó: cùng bộ câu đã xáo, cùng điểm và số câu đã làm
+  let qs, i, score, correctCount, cheatCount, startedAt;
+  if (saved?.qs?.length){ qs = saved.qs; i = Math.min(Math.max(saved.i||0, (saved.answers||[]).length), qs.length-1); score = saved.score||0; correctCount = saved.correctCount||0; cheatCount = saved.cheatCount||0; startedAt = saved.startedAt||Date.now(); }
+  else { const pool = shuffleArr(ct.questions).slice(0, ct.numQuestions>0 ? Math.min(ct.numQuestions, ct.questions.length) : ct.questions.length);
+    qs = pool.map(q=>{ if (q.type==='tf' || !Array.isArray(q.answers) || q.answers.length<2) return q;
+      const idxs = shuffleArr(q.answers.map((_,j)=>j));
+      return {...q, answers: idxs.map(j=>q.answers[j]), correct: idxs.indexOf(q.correct)}; });
+    i = 0; score = 0; correctCount = 0; cheatCount = 0; startedAt = Date.now(); }
+  const nameKey = nickname.trim().toLowerCase();
+  let finished=false, locked=false, cheated=false, qStart=0, timerInt=null;
+  const answers = saved?.answers ? [...saved.answers] : [];
+  function saveProg(){ if (finished) return; try{ localStorage.setItem('eq_resume_contest', JSON.stringify({ code: ct.code, nickname, avatar: avatar||'🙂', attemptsBefore: attemptsBefore||0, qs, i, score, correctCount, cheatCount, answers, startedAt, savedAt: Date.now() })); }catch{} }
   const onVis = ()=>{ if (document.hidden) markCheat(); };
   const onBlur = ()=>markCheat();
   document.addEventListener('visibilitychange', onVis); window.addEventListener('blur', onBlur);
@@ -914,6 +970,7 @@ function renderContestPlay(ct, nickname, attemptsBefore, avatar){
   }
   async function finish(){
     if (finished) return; finished = true; cleanup();
+    try{ localStorage.removeItem('eq_resume_contest'); }catch{}
     const res = { name: nickname, avatar: avatar||'🙂', nameKey, className: ct.className||'', score, correctCount, total: qs.length, cheatCount, attempt: (attemptsBefore||0)+1, startedAt, finishedAt: Date.now(), durationMs: Date.now()-startedAt, answers };
     await contestSubmitResult(ct.code, res);
     const all = await contestResults(ct.code);
@@ -933,7 +990,7 @@ function renderContestPlay(ct, nickname, attemptsBefore, avatar){
     let pts = correct ? Math.round((q.points||1000)*(1-Math.min(elapsed/((q.time||20)*1000),1)/2)) : 0;
     if (correct && cheated && ct.antiCheat!==false) pts = Math.round(pts*0.5);
     score += pts; if (correct) correctCount++;
-    answers.push({choice, correct, points: pts, cheated});
+    answers.push({choice, correct, points: pts, cheated}); saveProg();
     app.querySelectorAll('[data-ca]').forEach(b=>{ b.disabled = true; const j=+b.dataset.ca;
       if (j===q.correct) b.style.background='#26890c';
       else if (j===choice) b.style.background='#c00'; b.style.color='#fff'; });
@@ -941,7 +998,7 @@ function renderContestPlay(ct, nickname, attemptsBefore, avatar){
     setTimeout(()=>{ i++; if (i>=qs.length || Date.now()>ct.endAt) finish(); else drawQ(); }, 1000);
   }
   function drawQ(){
-    cheated = false; locked = false; qStart = Date.now();
+    cheated = false; locked = false; qStart = Date.now(); saveProg();
     const q = qs[i], total = q.time||20, list = q.type==='tf' ? ['Đúng','Sai'] : q.answers;
     app.innerHTML = `<div class="card"><div class="row"><span class="tag">Câu ${i+1}/${qs.length}</span><span class="tag">Điểm: ${score}</span><span class="tag" id="ctLeft">⏱️ ${total} giây</span></div>
     <div style="background:#eee;border-radius:99px;height:10px;margin:8px 0"><div id="ctBar" style="background:#46178f;height:10px;border-radius:99px;width:100%"></div></div>
