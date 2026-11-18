@@ -1,4 +1,4 @@
-*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#faf8ff;color:#111}
+*{box-sizing:border-box}body{margin:0;font-family:'Times New Roman',Times,Arial,Helvetica,sans-serif;background:#faf8ff;color:#111}
 header{background:linear-gradient(90deg,#bfdbfe,#e9d5ff 45%,#fbcfe8);color:#312e81;display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:12px 16px;position:sticky;top:0;z-index:10;box-shadow:0 2px 12px #7c3aed22}
 .logo{font-size:26px;font-weight:800;color:#3b0764;display:flex;align-items:center;gap:8px}nav{display:flex;gap:8px;flex-wrap:wrap}nav button{background:#ffffffa8;border:0;color:#312e81;padding:9px 14px;border-radius:10px;font-weight:700;cursor:pointer}nav button:hover{background:#fff}
 .sync{margin-left:auto;background:#ffffffa8;padding:6px 10px;border-radius:999px;font-size:13px;color:#312e81}
@@ -28,3 +28,5 @@ table{width:100%;border-collapse:collapse}td,th{padding:10px;border-bottom:1px s
 .media{margin:12px 0;text-align:center}.media img{max-width:100%;max-height:380px;border-radius:12px}.media audio{width:100%;max-width:480px}.media iframe{border:0;border-radius:12px;max-width:640px}
 .katex{font-size:1.06em}
 @media(max-width:600px){.answers{grid-template-columns:1fr}.pinbox{font-size:34px}}
+
+button{font-family:inherit}input,textarea,select{font-family:inherit}

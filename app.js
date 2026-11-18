@@ -729,15 +729,17 @@ async function renderClasses(){
   app.innerHTML=`<div class="card"><h1>🏫 Lớp học của tôi</h1><p class="small">Gói ${esc(myPlan().name)}${limit('maxClasses')?` • Tối đa ${limit('maxClasses')} lớp`:''}${limit('maxMembersPerClass')?` • Tối đa ${limit('maxMembersPerClass')} thành viên/lớp`:''}</p>
   <div class="row"><input class="grow" id="clsName" placeholder="Tên lớp mới, ví dụ: 5A1"><button class="btn green" id="addCls">+ Tạo lớp</button></div>
   ${mine.map(c=>`<div class="card" style="background:#fafafa"><b>${esc(c.name)}</b> <span class="small">(${(c.members||[]).length} thành viên)</span>
-    <div>${(c.members||[]).map((m,i)=>`<span class="player" style="background:#666">${esc(m)} <a href="#" data-rm="${c.id}:${i}" style="color:#fff">✕</a></span>`).join('')}</div>
-    <div class="row"><input class="grow" data-member="${c.id}" placeholder="Tên học sinh / thành viên mới"><button class="btn light" data-addm="${c.id}">+ Thêm thành viên</button>
-    <button class="btn red" data-delcls="${c.id}">Xoá lớp</button></div></div>`).join('')||'<p class="small">Chưa có lớp nào.</p>'}</div>`;
+    <div>${(c.members||[]).map((m,i)=>`<span class="player">${esc(m)} <a href="#" data-rm="${c.id}:${i}" style="color:#4c1d95">✕</a></span>`).join('')}</div>
+    <div><label class="small"><b>Thêm học sinh vào lớp:</b> dán hoặc nhập danh sách, <b>mỗi học sinh 1 hàng</b> (dán từ Excel, Word hay Zalo đều được; tên trùng trong lớp sẽ tự bỏ qua):</label>
+    <textarea data-memberlist="${c.id}" rows="4" placeholder="Nguyễn Văn A&#10;Trần Thị B&#10;Lê Văn C"></textarea>
+    <div class="row"><button class="btn light" data-addm="${c.id}">+ Thêm danh sách vào lớp</button><button class="btn red" data-delcls="${c.id}">Xoá lớp</button></div></div></div>`).join('')||'<p class="small">Chưa có lớp nào.</p>'}</div>`;
   $('#addCls').onclick=async()=>{ const name=$('#clsName').value.trim(); if(!name) return alert('Thầy nhập tên lớp nhé!');
     const limC=limit('maxClasses'); if(limC>0&&mine.length>=limC) return alert(`Gói ${myPlan().name} tối đa ${limC} lớp.`);
     await store.saveClass({name,ownerUid:me.uid,ownerEmail:me.email,members:[]}); renderClasses(); };
-  app.querySelectorAll('[data-addm]').forEach(b=>b.onclick=async()=>{ const c=mine.find(x=>x.id===b.dataset.addm); const inp=app.querySelector(`[data-member="${c.id}"]`); const v=inp.value.trim(); if(!v) return;
-    const limM=limit('maxMembersPerClass'); if(limM>0&&(c.members||[]).length>=limM) return alert(`Gói ${myPlan().name} tối đa ${limM} thành viên / lớp.`);
-    c.members=[...(c.members||[]),v]; await store.saveClass(c); renderClasses(); });
+  app.querySelectorAll('[data-addm]').forEach(b=>b.onclick=async()=>{ const c=mine.find(x=>x.id===b.dataset.addm); const ta=app.querySelector(`[data-memberlist="${c.id}"]`); const names=(ta?.value||'').split(/\n+/).map(x=>x.trim()).filter(Boolean); if(!names.length) return alert('Thầy dán/nhập danh sách học sinh (mỗi học sinh 1 hàng) nhé!');
+    const limM=limit('maxMembersPerClass'); const cur=[...(c.members||[])]; const fresh=names.filter(n=>!cur.includes(n)); let add=fresh;
+    if(limM>0 && cur.length+fresh.length>limM){ add=fresh.slice(0, Math.max(0, limM-cur.length)); if(!add.length) return alert(`Gói ${myPlan().name} tối đa ${limM} thành viên / lớp.`); }
+    c.members=[...cur, ...add]; await store.saveClass(c); alert(`Đã thêm ${add.length} học sinh vào lớp ${c.name}${names.length-add.length>0?` (bỏ qua ${names.length-add.length} tên trùng hoặc vượt giới hạn gói)`:''}.`); renderClasses(); });
   app.querySelectorAll('[data-rm]').forEach(a=>a.onclick=async e=>{ e.preventDefault(); const [cid,idx]=a.dataset.rm.split(':'); const c=mine.find(x=>x.id===cid); c.members.splice(+idx,1); await store.saveClass(c); renderClasses(); });
   app.querySelectorAll('[data-delcls]').forEach(b=>b.onclick=async()=>{ if(confirm('Xoá lớp này?')){ await store.deleteClass(b.dataset.delcls); renderClasses(); } });
 }
@@ -766,6 +768,23 @@ function renderAdmin(tab){
   app.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>renderAdmin(b.dataset.tab));
   ({members:renderAdminMembers, keys:renderAdminKeys, plans:renderAdminPlans})[tab]($('#tabBody'));
 }
+async function renderAdminDevices(uid){
+  stopListen();
+  const us = await F.getDoc(F.doc(db,'users',uid)); const u = us.exists()? us.data() : {};
+  const ds = await F.getDocs(F.collection(db,'users',uid,'devices'));
+  const rows = ds.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>(b.lastLoginAt||0)-(a.lastLoginAt||0));
+  app.innerHTML = `<div class="card"><h1>📱 Thiết bị đăng nhập</h1>
+  <p><b>${esc(u.displayName||'(chưa có tên)')}</b> • ${esc(u.email||'')} • Tổng số thiết bị: <b>${rows.length}</b></p>
+  <p class="small">Mỗi thiết bị có một ID riêng — thiết bị dùng ID đó đăng nhập ở IP khác vẫn tính là cùng một thiết bị. Bấm vào một dòng thiết bị để xem chi tiết lịch sử đăng nhập của thiết bị đó.</p>
+  ${rows.length? `<div style="overflow-x:auto"><table class="sortable"><tr><th>STT</th><th>Tên thiết bị</th><th>ID thiết bị</th><th>Đăng nhập lần đầu</th><th>Đăng nhập gần nhất</th><th>IP gần nhất</th></tr>
+  ${rows.map((v,ix)=>{ const logs=(Array.isArray(v.logins)&&v.logins.length)?v.logins:[{at:v.lastLoginAt,ip:v.ip},{at:v.firstLoginAt,ip:v.ip}].filter(x=>x.at);
+    return `<tr data-devrow="${esc(v.id)}" style="cursor:pointer" title="Bấm để xem lịch sử đăng nhập"><td data-sort="${ix+1}">${ix+1}</td><td><b>${esc(v.name)}</b></td><td><span class="small">${esc(v.id)}</span></td><td data-sort="${v.firstLoginAt||0}">${fmtDT(v.firstLoginAt)}</td><td data-sort="${v.lastLoginAt||0}">${fmtDT(v.lastLoginAt)}</td><td>${esc(v.ip||'')}</td></tr>
+  <tr data-devdetail="${esc(v.id)}" style="display:none"><td colspan="6"><b class="small">🕘 Chi tiết lịch sử đăng nhập của thiết bị "${esc(v.name)}":</b><table><tr><th>STT</th><th>Thời gian đăng nhập</th><th>Địa chỉ IP</th></tr>${logs.map((l,j)=>`<tr><td>${j+1}</td><td>${fmtDT(l.at)}</td><td>${esc(l.ip||'Không rõ')}</td></tr>`).join('')||'<tr><td colspan="3">Chưa có lịch sử.</td></tr>'}</table></td></tr>`; }).join('')}</table></div>` : '<p class="small">Chưa có thiết bị nào đăng nhập.</p>'}
+  <button class="btn" id="devBack">← Quay lại Quản trị thành viên</button></div>`;
+  enableSorting(app);
+  $('#devBack').onclick=()=>renderAdmin('members');
+  app.querySelectorAll('[data-devrow]').forEach(r=>r.onclick=()=>{ const d=app.querySelector(`[data-devdetail="${r.dataset.devrow}"]`); if(d) d.style.display=d.style.display==='none'?'':'none'; });
+}
 async function renderAdminMembers(box){
   if (DEMO){ box.innerHTML='<p>Bản demo chưa nối Firebase.</p>'; return; }
   const snap=await F.getDocs(F.query(F.collection(db,'users'),F.orderBy('createdAt','asc')));
@@ -788,13 +807,7 @@ async function renderAdminMembers(box){
   enableSorting(box);
   function can2(u,k){ if(u.role==='admin') return true; if(u.features?.[k]===false) return false; const pf=plans[u.plan||'free']?.features; return !(pf&&(pf[k]===0||pf[k]===false)); }
   users.forEach(async u=>{ const ds=await F.getDocs(F.collection(db,'users',u.uid,'devices')); const el=box.querySelector(`[data-devcount="${u.uid}"]`); if(el) el.textContent=ds.size; });
-  box.querySelectorAll('[data-devices]').forEach(b=>b.onclick=async()=>{ const uid=b.dataset.devices, dv=box.querySelector(`[data-devlist="${uid}"]`);
-    if(dv.innerHTML){ dv.innerHTML=''; return; } const ds=await F.getDocs(F.collection(db,'users',uid,'devices'));
-    if(ds.empty){ dv.innerHTML='<p class="small">Chưa có thiết bị nào đăng nhập.</p>'; return; }
-    dv.innerHTML = `<table><tr><th>STT</th><th>Tên thiết bị</th><th>ID thiết bị</th><th>Đăng nhập gần nhất</th></tr>${ds.docs.map((d,ix)=>{ const v=d.data(); const logs=(Array.isArray(v.logins)&&v.logins.length)?v.logins:[{at:v.lastLoginAt,ip:v.ip},{at:v.firstLoginAt,ip:v.ip}].filter(x=>x.at);
-      return `<tr data-devhist="${d.id}" style="cursor:pointer" title="Bấm để xem lịch sử đăng nhập của thiết bị này"><td>${ix+1}</td><td><b>${esc(v.name)}</b></td><td><span class="small">${esc(d.id)}</span></td><td>${fmtDT(v.lastLoginAt)}</td></tr>
-      <tr data-devhistbox="${d.id}" style="display:none"><td colspan="4"><b class="small">🕘 Chi tiết lịch sử đăng nhập của thiết bị "${esc(v.name)}":</b><table><tr><th>STT</th><th>Thời gian đăng nhập</th><th>Địa chỉ IP</th></tr>${logs.map((l,j)=>`<tr><td>${j+1}</td><td>${fmtDT(l.at)}</td><td>${esc(l.ip||'Không rõ')}</td></tr>`).join('')||'<tr><td colspan="3">Chưa có lịch sử.</td></tr>'}</table></td></tr>`; }).join('')}</table><p class="small">Bấm vào một dòng thiết bị để xem lịch sử đăng nhập chi tiết của thiết bị đó.</p>`;
-    dv.querySelectorAll('[data-devhist]').forEach(r=>r.onclick=()=>{ const hb=dv.querySelector(`[data-devhistbox="${r.dataset.devhist}"]`); if(hb) hb.style.display=hb.style.display==='none'?'':'none'; }); });
+  box.querySelectorAll('[data-devices]').forEach(b=>b.onclick=()=>renderAdminDevices(b.dataset.devices));
   box.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{ const uid=b.dataset.u, act=b.dataset.act, ref=F.doc(db,'users',uid), u=users.find(x=>x.uid===uid);
     if(act==='approve'){ await F.updateDoc(ref,{status:'approved', plan:u.plan||'free'}); renderAdmin('members'); }
     if(act==='block'&&confirm(`Chặn tài khoản ${u.email}?`)){ await F.updateDoc(ref,{status:'blocked'}); renderAdmin('members'); }
@@ -984,8 +997,8 @@ async function renderContests(){
   app.innerHTML = `<div class="card"><h1>🏆 Tạo cuộc thi</h1>
   <label class="small"><b>Chọn bộ đề</b></label>
   <select id="ctQuiz">${quizzes.map(q=>`<option value="${q.id}">${esc(q.title)} (${q.questions.length} câu)</option>`).join('')||'<option value="">— Chưa có bộ đề nào —</option>'}</select>
-  <label class="small"><b>Chọn lớp</b> (không bắt buộc)</label>
-  <select id="ctClass"><option value="">— Không chọn lớp —</option>${classes.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+  <label class="small"><b>Chọn lớp</b> (không bắt buộc — chọn 1 hoặc nhiều lớp; nếu có chọn lớp, học sinh phải <b>chọn lớp rồi chọn tên theo danh sách lớp</b>, không tự nhập biệt danh)</label>
+  <div id="ctClassBox" style="margin:4px 0 10px">${classes.length? classes.map(c=>`<label class="small" style="margin-right:16px"><input type="checkbox" data-ctclass="${c.id}" style="width:auto"> ${esc(c.name)}</label>`).join('') : '<span class="small">Chưa có lớp nào — tạo lớp ở mục 🏫 Lớp học nếu muốn học sinh chọn tên theo lớp.</span>'}</div>
   <div class="row"><label class="small grow">Thi từ ngày giờ <input id="ctStart" type="datetime-local" value="${dtLocal(now)}"></label>
   <label class="small grow">Đến ngày giờ <input id="ctEnd" type="datetime-local" value="${dtLocal(now+2*3600*1000)}"></label></div>
   <div class="row"><label class="small grow">Mật mã phòng thi (không bắt buộc) <input id="ctPass" placeholder="Để trống nếu không đặt mật mã"></label>
@@ -1003,9 +1016,9 @@ async function renderContests(){
     const quiz = quizzes.find(q=>q.id===$('#ctQuiz').value); if(!quiz) return alert('Thầy/cô chưa có bộ đề nào. Tạo bộ đề trước nhé!');
     const startAt = new Date($('#ctStart').value).getTime(), endAt = new Date($('#ctEnd').value).getTime();
     if(!startAt||!endAt||endAt<=startAt) return alert('Khung giờ thi chưa hợp lệ: giờ kết thúc phải sau giờ bắt đầu.');
-    const cls = classes.find(c=>c.id===$('#ctClass').value);
+    const selCls = classes.filter(c=>app.querySelector(`[data-ctclass="${c.id}"]`)?.checked);
     const code = await contestCreate({ cover: quiz.cover||'', contestBg: quiz.contestBg||'', bgFade: quiz.bgFade??85, quizId: quiz.id, title: quiz.title, subject: quiz.subject||'', questions: quiz.questions,
-      classId: cls?.id||'', className: cls?.name||'', startAt, endAt, password: $('#ctPass').value.trim(),
+      classId: selCls[0]?.id||'', classIds: selCls.map(c=>c.id), className: selCls.map(c=>c.name).join(', '), startAt, endAt, password: $('#ctPass').value.trim(),
       maxAttempts: Math.max(1,Math.min(10,+$('#ctAttempts').value||1)), antiCheat: $('#ctAnti').checked, numQuestions: Math.max(0,+$('#ctNumQ').value||0), showLeaderboard: $('#ctShowBoard').checked,
       ownerUid: me?.uid||'', ownerEmail: me?.email||'', createdAt: Date.now() });
     alert('Đã tạo cuộc thi! Mã phòng thi: '+code+'\nThầy/cô gửi mã này cho học sinh, hoặc bấm nút "📱 QR / Liên kết" ở cuộc thi vừa tạo để chép liên kết / cho học sinh quét mã QR vào thẳng phòng thi trong khung giờ đã đặt.');
@@ -1025,10 +1038,15 @@ async function renderContestGate(code, nickname){
   const ct = await contestGet(code);
   if (!ct){ alert('Không tìm thấy phòng thi này. Em kiểm tra lại mã phòng thi nhé!'); return; }
   const now = Date.now(), open = !ct.closed && now>=ct.startAt && now<=ct.endAt;
+  const classIds = (Array.isArray(ct.classIds)&&ct.classIds.length)? ct.classIds : (ct.classId?[ct.classId]:[]);
+  let gateClasses = [];
+  if (classIds.length){ try{ const allC = await store.listClasses(); gateClasses = allC.filter(c=>classIds.includes(c.id)); }catch{} }
+  const rosterMode = gateClasses.length>0;
   app.innerHTML = `<div class="card join"${ctBgStyle(ct)}><h1>🏆 ${esc(ct.title)}</h1>
   <p class="small">${ct.className?`Lớp: <b>${esc(ct.className)}</b> • `:''}${ct.numQuestions>0?`Thi ${ct.numQuestions} câu (chọn ngẫu nhiên từ ${ct.questions.length} câu của bộ đề)`:ct.questions.length+' câu hỏi'} • Mỗi em được làm tối đa <b>${ct.maxAttempts||1} lần</b><br>Khung giờ thi: từ <b>${fmtDT(ct.startAt)}</b> đến <b>${fmtDT(ct.endAt)}</b></p>
   <div id="ctResume"></div>
-  ${open? `<input id="gNick" placeholder="Họ tên của em" value="${esc(nickname||'')}">
+  ${open? `${rosterMode? `<label class="small" style="text-align:left;display:block"><b>Chọn lớp của em:</b></label><select id="gClass">${gateClasses.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+  <label class="small" style="text-align:left;display:block"><b>Chọn tên của em trong danh sách lớp:</b></label><select id="gName"></select>` : `<input id="gNick" placeholder="Họ tên của em" value="${esc(nickname||'')}">`}
   <p class="small" style="text-align:left;margin:10px 0 4px"><b>Chọn avatar:</b></p>${avatarPickerHtml('gAvPick')}
   ${ct.password?'<input id="gPass" type="password" placeholder="Mật mã phòng thi">':''}
   <button class="btn green" style="width:100%" id="gStart">✔ Sẵn sàng — Bắt đầu làm bài</button>
@@ -1037,6 +1055,8 @@ async function renderContestGate(code, nickname){
   <button class="btn" style="width:100%" onclick="location.reload()">← Về trang chủ</button>`}</div>`;
   if (!open) return;
   const getGAv = wireAvatarPicker('gAvPick');
+  const fillNames = ()=>{ const sel=$('#gName'); if(!sel) return; const cls=gateClasses.find(c=>c.id===$('#gClass')?.value) || gateClasses[0]; const mem=(cls?.members||[]).filter(Boolean); sel.innerHTML = mem.length? mem.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('') : '<option value="">— Lớp chưa có danh sách học sinh —</option>'; };
+  if (rosterMode){ const gc=$('#gClass'); if(gc) gc.onchange=fillNames; fillNames(); }
   // Có bài làm dở đã lưu trên máy này (lỡ tải lại trang) thì cho làm tiếp, không mất bài và không tốn thêm lượt làm
   let savedCt = null;
   try{ savedCt = JSON.parse(localStorage.getItem('eq_resume_contest')||'null'); }catch{}
@@ -1044,12 +1064,13 @@ async function renderContestGate(code, nickname){
     const box = $('#ctResume'), doneN = (savedCt.answers||[]).length;
     if (box) box.innerHTML = `<div class="notice">▶ <b>${esc(savedCt.nickname)}</b> đang làm dở bài thi này (đã làm ${doneN}/${savedCt.qs.length} câu, ${savedCt.score||0} điểm) — có phải em vừa tải lại trang không?<br>
     <button class="btn green" id="ctResumeBtn" style="margin-top:8px">↪ Tiếp tục làm bài</button> <button class="btn light" id="ctDiscardBtn" style="margin-top:8px">Bỏ bài làm dở</button></div>`;
-    $('#gNick').value = savedCt.nickname||'';
+    const gn=$('#gNick'); if(gn) gn.value = savedCt.nickname||'';
     const rb = $('#ctResumeBtn'); if (rb) rb.onclick = ()=>renderContestPlay(ct, savedCt.nickname, savedCt.attemptsBefore||0, savedCt.avatar, savedCt);
     const db2 = $('#ctDiscardBtn'); if (db2) db2.onclick = ()=>{ try{ localStorage.removeItem('eq_resume_contest'); }catch{} savedCt = null; if (box) box.innerHTML=''; };
   }
   $('#gStart').onclick = async()=>{
-    const nick = $('#gNick').value.trim(); if(!nick) return alert('Em nhập họ tên trước nhé!');
+    const nick = rosterMode ? ($('#gName')?.value||'').trim() : $('#gNick').value.trim();
+    if(!nick) return alert(rosterMode ? 'Em chọn lớp và chọn tên của mình trong danh sách trước nhé!' : 'Em nhập họ tên trước nhé!');
     if (ct.password && $('#gPass').value.trim() !== ct.password) return alert('Mật mã phòng thi chưa đúng. Em hỏi lại thầy/cô nhé!');
     const nameKey = nick.toLowerCase();
     if (savedCt && savedCt.code===ct.code && nameKey===String(savedCt.nickname||'').trim().toLowerCase() && savedCt.qs?.length) return renderContestPlay(ct, savedCt.nickname, savedCt.attemptsBefore||0, savedCt.avatar, savedCt);
@@ -1154,17 +1175,24 @@ async function renderContestStats(code){
 
 async function renderReports(){
   const now = Date.now();
-  const open = (await contestList()).filter(ct=>(me?.role==='admin'||!ct.ownerUid||ct.ownerUid===me?.uid) && !ct.closed && now>=ct.startAt && now<=ct.endAt).sort((a,b)=>(a.endAt||0)-(b.endAt||0));
+  const mineCt = ct => me?.role==='admin'||!ct.ownerUid||ct.ownerUid===me?.uid;
+  const all = await contestList();
+  const ended = all.filter(ct=>mineCt(ct) && (ct.closed || now>ct.endAt)).sort((a,b)=>(b.endAt||0)-(a.endAt||0));
+  const open = all.filter(ct=>mineCt(ct) && !ct.closed && now>=ct.startAt && now<=ct.endAt).sort((a,b)=>(a.endAt||0)-(b.endAt||0));
   app.innerHTML=`<div class="card"><h1>📊 Báo cáo</h1>
+  <h2>🏁 Các cuộc thi đã kết thúc (${ended.length})</h2>
+  ${ended.length? ended.map(ct=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(ct.title)}</b> ${ct.closed?'<b style="color:#e11d48">🔒 Đã đóng</b>':'<span class="small">(đã hết giờ)</span>'}<br><span class="small">Mã phòng thi ${esc(ct.code)} • ${fmtDT(ct.startAt)} → ${fmtDT(ct.endAt)} • Đã có <span data-repcount="${esc(ct.code)}">…</span> lượt làm bài</span></div>
+  <button class="btn" data-endedview="${esc(ct.code)}">📊 Xem bảng xếp hạng</button></div></div>`).join('') : '<p class="small">Chưa có cuộc thi nào đã kết thúc.</p>'}
   <h2>🏆 Các cuộc thi đang mở (${open.length})</h2>
-  <p class="small">Các cuộc thi đang trong khung giờ mở. Thầy/cô có thể xem bảng xếp hạng, sửa thông tin hoặc đóng phòng thi ngay tại đây. (Cuộc thi đã đóng hoặc đã hết giờ: xem thống kê tại mục 🏆 Cuộc thi → 📊 Thống kê.)</p>
+  <p class="small">Các cuộc thi đang trong khung giờ mở. Thầy/cô có thể xem bảng xếp hạng, sửa thông tin hoặc đóng phòng thi ngay tại đây.</p>
   ${open.length? open.map(ct=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(ct.title)}</b> <b style="color:#16a34a">● Đang mở</b><br><span class="small">Mã phòng thi ${esc(ct.code)} • Đóng lúc: ${fmtDT(ct.endAt)} • Đã có <span data-repcount="${esc(ct.code)}">…</span> lượt làm bài</span></div>
   <button class="btn" data-repview="${esc(ct.code)}">👁️ Xem</button><button class="btn light" data-repedit="${esc(ct.code)}">✏️ Sửa</button><button class="btn red" data-repclose="${esc(ct.code)}">🔒 Đóng</button></div></div>`).join('') : '<p class="small">Hiện không có cuộc thi nào đang mở. Vào mục 🏆 Cuộc thi → Gián tiếp để tạo và mở cuộc thi mới nhé.</p>'}
   </div>`;
+  app.querySelectorAll('[data-endedview]').forEach(b=>b.onclick=()=>renderContestStats(b.dataset.endedview));
   app.querySelectorAll('[data-repview]').forEach(b=>b.onclick=()=>renderContestStats(b.dataset.repview));
   app.querySelectorAll('[data-repedit]').forEach(b=>b.onclick=()=>renderContestEdit(b.dataset.repedit));
   app.querySelectorAll('[data-repclose]').forEach(b=>b.onclick=async()=>{ if(!confirm('Đóng cuộc thi này? Học sinh sẽ không vào làm bài được nữa.')) return; await contestPatch(b.dataset.repclose,{closed:true}); renderReports(); });
-  open.forEach(async ct=>{ const el=app.querySelector(`[data-repcount="${ct.code}"]`); if(el){ const rs=await contestResults(ct.code); el.textContent=rs.length; } });
+  [...ended, ...open].forEach(async ct=>{ const el=app.querySelector(`[data-repcount="${ct.code}"]`); if(el){ const rs=await contestResults(ct.code); el.textContent=rs.length; } });
 }
 async function renderContestEdit(code){
   const ct = await contestGet(code); if(!ct){ alert('Không tìm thấy cuộc thi.'); return; }
