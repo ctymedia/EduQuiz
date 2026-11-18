@@ -161,11 +161,36 @@ function paintNav(){ document.querySelectorAll('[data-nav]').forEach(b=>{ const 
   else if(n==='contests') ok = can('host')||can('create');
   else { const f=NAV_FEATURES[n]; ok = f? can(f) : true; }
   b.style.display = ok? '' : 'none'; }); }
+const nameClass = u => { if(!u) return 'uname-free'; if(u.role==='admin') return 'rainbow-text'; const pl=u.plan||'free'; return pl==='ultra'?'uname-ultra':pl==='pro'?'uname-pro':pl==='custom'?'uname-custom':'uname-free'; };
+const avatarHtml = (u, sz=30) => { const a=u?.avatar; if(a && a.startsWith('data:')) return `<img class="uavatar" src="${a}" style="width:${sz}px;height:${sz}px;border:2px solid #fff;box-shadow:0 1px 4px #0003;vertical-align:middle">`; return `<span style="font-size:${Math.round(sz*0.85)}px;line-height:1;vertical-align:middle">${a||'👤'}</span>`; };
+function renderProfile(){
+  if(!me) return renderLogin();
+  stopListen();
+  let av = me.avatar||'';
+  app.innerHTML = `<div class="card join" style="max-width:540px"><h1>🖼️ Avatar của tôi</h1>
+  <div id="profPrev" style="margin:12px 0">${avatarHtml({avatar:av}, 88)}</div>
+  <p class="small">Chọn một hình đại diện có sẵn:</p>
+  ${avatarPickerHtml('profAvPick')}
+  <p class="small" style="margin-top:16px">Hoặc tải ảnh của riêng mình lên:</p>
+  <input type="file" accept="image/*" id="profFile">
+  <div class="row" style="justify-content:center;margin-top:12px"><button class="btn green" id="profSave">💾 Lưu avatar</button><button class="btn light" id="profRemove">Xóa avatar</button></div>
+  <p class="small" id="profMsg"></p></div>`;
+  const getAv = wireAvatarPicker('profAvPick');
+  if (av && AVATARS.includes(av)){ const cur=app.querySelector(`#profAvPick [data-av="${av}"]`); if(cur) cur.click(); }
+  app.querySelectorAll('#profAvPick [data-av]').forEach(b=>b.addEventListener('click',()=>{ av=b.dataset.av; $('#profPrev').innerHTML=avatarHtml({avatar:av},88); }));
+  $('#profFile').onchange=async e=>{ const f=e.target.files[0]; if(!f) return; av=await compressImage(f,256); $('#profPrev').innerHTML=avatarHtml({avatar:av},88); };
+  $('#profRemove').onclick=()=>{ av=''; $('#profPrev').innerHTML=avatarHtml({avatar:''},88); };
+  $('#profSave').onclick=async()=>{ const final = av;
+    if (DEMO){ me.avatar=final; }
+    else { await F.updateDoc(F.doc(db,'users',me.uid), { avatar: final }); me.avatar=final; }
+    paintAuth(); $('#profMsg').textContent='✔ Đã lưu avatar mới!'; };
+}
 function paintAuth(){ const el=$('#authArea'); if(!el) return; paintNav();
   $('#adminBtn').style.display = me?.role==='admin' ? '' : 'none';
-  el.innerHTML = me ? `<span>👤 ${esc(me.displayName||me.email)}${me.role==='admin'?' (Admin)':' • Gói '+esc(myPlan().name)}</span> <button id="logoutBtn">Đăng xuất</button>`
+  el.innerHTML = me ? `<span style="display:inline-flex;align-items:center;gap:7px">${avatarHtml(me,30)}<span class="${nameClass(me)}">${esc(me.displayName||me.email)}</span></span> <button id="profileBtn">🖼️ Avatar</button> <button id="logoutBtn">Đăng xuất</button>`
                     : `<button id="loginBtn">Đăng nhập</button> <button id="regBtn">Đăng ký</button>`;
-  if (me) $('#logoutBtn').onclick=async()=>{ stopListen(); if(!DEMO) await A.signOut(auth); me=null; paintAuth(); renderHome(); };
+  if (me){ $('#logoutBtn').onclick=async()=>{ stopListen(); if(!DEMO) await A.signOut(auth); me=null; paintAuth(); renderHome(); };
+    $('#profileBtn').onclick=()=>renderProfile(); }
   else { $('#loginBtn').onclick=()=>renderLogin(); $('#regBtn').onclick=()=>renderRegister(); }
 }
 document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{ stopListen(); const n=b.dataset.nav;
@@ -484,7 +509,7 @@ function renderCreate(prefill, title0, subject0, editId, cover0, bg0, cFade0, bF
       app.querySelectorAll('[data-preview-a]').forEach(el=>{ const [qi,aj]=el.dataset.previewA.split('-').map(Number); el.textContent=questions[qi]?.answers?.[aj]||''; math(el.closest('.small')||el.parentElement); }); }
   }; draw();
 }
-function compressImage(file){ return new Promise(res=>{ const img=new Image(); img.onload=()=>{ const max=900, sc=Math.min(1,max/Math.max(img.width,img.height));
+function compressImage(file, maxW){ return new Promise(res=>{ const img=new Image(); img.onload=()=>{ const max=maxW||900, sc=Math.min(1,max/Math.max(img.width,img.height));
   const cv=document.createElement('canvas'); cv.width=img.width*sc; cv.height=img.height*sc; cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height); res(cv.toDataURL('image/jpeg',0.82)); };
   img.onerror=()=>res(''); img.src=URL.createObjectURL(file); }); }
 
@@ -795,7 +820,7 @@ async function renderAdminMembers(box){
   box.innerHTML=`<p class="small">${users.length} thành viên • Bấm ↕ trên đầu cột để sắp xếp • Bấm số thiết bị để xem tên thiết bị + IP.</p>
   <div style="overflow-x:auto"><table class="sortable"><tr><th>Thành viên</th><th>Trạng thái</th><th>Gói</th><th>Hạn sử dụng</th><th>Thiết bị</th><th data-nosort>Thao tác</th></tr>
   ${users.map(u=>`<tr>
-    <td><b>${esc(u.displayName||'(chưa có tên)')}</b><br><span class="small">${esc(u.email)}${u.role==='admin'?' • 👑 Admin':''}<br>Đăng ký: ${fmtDate(u.createdAt)}</span></td>
+    <td>${avatarHtml(u,26)} <b class="${nameClass(u)}">${esc(u.displayName||'(chưa có tên)')}</b><br><span class="small">${esc(u.email)}${u.role==='admin'?' • 👑 Admin':''}<br>Đăng ký: ${fmtDate(u.createdAt)}</span></td>
     <td>${statusTxt[u.status]||esc(u.status)}</td>
     <td><b>${esc((plans[u.plan||'free']?.name)||'Free')}</b></td>
     <td data-sort="${u.expiresAt||9999999999999}">${fmtDate(u.expiresAt)}${u.expiresAt&&Date.now()>u.expiresAt?' <b style="color:#e11d48">(hết hạn)</b>':''}</td>
@@ -1255,16 +1280,25 @@ function applyFx(){
   const fx = (window.__siteSettings||{}).effect||{}; const type = fx.type||'none';
   if (type==='none') return;
   const n = Math.min(100, Math.max(1, +fx.density||30)), spd = +fx.speed||1, size = +fx.size||22;
-  const glyphs = { snow:['❄','❅','❆'], hearts:['❤️','💗','💖','💕'], mai:['🌼'], dao:['🌸'], tree:['🎄'], reindeer:['🦌'], santa:['🎅','🎄','🎁'] };
+  const glyphs = { tree:['🎄'], reindeer:['🦌'], santa:['🎅','🎄','🎁'] };
   for (let i=0;i<n;i++){
     const el = document.createElement('span'); el.className='fxp';
-    const dur = (type==='rain' ? (0.7+Math.random()*0.5) : (6+Math.random()*6)) / spd;
+    const base = type==='rain' ? (0.6+Math.random()*0.5) : type==='snow' ? (10+Math.random()*8) : (type==='mai'||type==='dao') ? (8+Math.random()*6) : type==='hearts' ? (9+Math.random()*6) : (9+Math.random()*7);
+    const dur = base / spd;
     el.style.left = (Math.random()*100)+'vw';
+    el.style.setProperty('--drift', (Math.random()*10-5).toFixed(1)+'vw');
     el.style.animationDuration = dur+'s';
     el.style.animationDelay = (-Math.random()*dur)+'s';
-    if (type==='rain'){ el.classList.add('fxrain'); }
-    else if (type==='banhchung'){ el.classList.add('fxbc'); el.style.width=size+'px'; el.style.height=size+'px'; }
-    else { const g = glyphs[type]||['❄']; el.textContent = g[Math.floor(Math.random()*g.length)]; el.style.fontSize = Math.round(size*(0.7+Math.random()*0.7))+'px'; }
+    const mid = document.createElement('span'); mid.className='fxin';
+    mid.style.animationDuration = (1.8+Math.random()*1.6)+'s';
+    mid.style.animationDelay = (-Math.random()*2)+'s';
+    if (type==='rain'){ mid.classList.add('fxrain'); mid.style.height = Math.round(size*3)+'px'; }
+    else if (type==='snow'){ mid.classList.add('fxsnow'); const d=Math.round(4+Math.random()*(size*0.55)); mid.style.width=d+'px'; mid.style.height=d+'px'; mid.style.opacity=(0.5+Math.random()*0.45).toFixed(2); if(Math.random()<0.35) mid.style.filter='blur(1px)'; }
+    else if (type==='mai' || type==='dao'){ mid.classList.add('fxpetal', type); mid.style.width=Math.round(size*(0.75+Math.random()*0.4))+'px'; mid.style.height=Math.round(size*(0.6+Math.random()*0.3))+'px'; mid.style.animationName='fxflutter'; mid.style.animationDuration=(2.2+Math.random()*2)+'s'; }
+    else if (type==='hearts'){ const h=document.createElement('span'); h.className='fxheart'; const d=Math.round(size*(0.62+Math.random()*0.4)); h.style.width=d+'px'; h.style.height=d+'px'; h.style.opacity=(0.75+Math.random()*0.25).toFixed(2); mid.appendChild(h); }
+    else if (type==='banhchung'){ mid.classList.add('fxbc'); mid.style.width=size+'px'; mid.style.height=size+'px'; }
+    else { const g = glyphs[type]||['❄']; mid.classList.add('fxemoji'); mid.textContent = g[Math.floor(Math.random()*g.length)]; mid.style.fontSize = Math.round(size*(0.8+Math.random()*0.6))+'px'; }
+    el.appendChild(mid);
     layer.appendChild(el);
   }
 }

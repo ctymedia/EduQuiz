@@ -34,8 +34,24 @@ button{font-family:inherit}input,textarea,select{font-family:inherit}
 .rainbow-text{font-weight:800;background-image:linear-gradient(110deg,transparent 42%,rgba(255,255,255,.9) 50%,transparent 58%),linear-gradient(90deg,#ef4444,#f97316,#eab308,#22c55e,#3b82f6,#8b5cf6,#ec4899,#ef4444);background-size:220% 100%,220% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:rainbowShine 5s linear infinite}
 @keyframes rainbowShine{0%{background-position:120% 0,0 0}100%{background-position:-120% 0,220% 0}}
 #fxLayer{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:2000}
-.fxp{position:absolute;top:-10vh;display:block;animation-name:fxfall;animation-timing-function:linear;animation-iteration-count:infinite;will-change:transform}
-@keyframes fxfall{0%{transform:translate3d(0,-10vh,0) rotate(0deg)}25%{transform:translate3d(2vw,22vh,0) rotate(95deg)}50%{transform:translate3d(-2vw,55vh,0) rotate(190deg)}75%{transform:translate3d(2vw,82vh,0) rotate(280deg)}100%{transform:translate3d(0,112vh,0) rotate(340deg)}}
-.fxrain{width:2px;height:72px;background:linear-gradient(rgba(125,211,252,0),#38bdf8);border-radius:2px;opacity:.65;animation-name:fxrainfall}
-@keyframes fxrainfall{0%{transform:translate3d(0,-10vh,0)}100%{transform:translate3d(-4vw,112vh,0)}}
-.fxbc{border:2px solid #166534;border-radius:5px;background:linear-gradient(45deg,transparent 46%,#fef08a 46%,#fef08a 54%,transparent 54%),linear-gradient(-45deg,transparent 46%,#fef08a 46%,#fef08a 54%,transparent 54%),#15803d}
+.fxp{position:absolute;top:-10vh;display:block;animation-name:fxfall2;animation-timing-function:linear;animation-iteration-count:infinite;will-change:transform}
+@keyframes fxfall2{0%{transform:translate3d(0,-10vh,0)}100%{transform:translate3d(var(--drift,3vw),112vh,0)}}
+.fxin{display:block;animation-name:fxswayX;animation-timing-function:ease-in-out;animation-iteration-count:infinite;animation-direction:alternate}
+@keyframes fxswayX{from{transform:translateX(-11px)}to{transform:translateX(11px)}}
+@keyframes fxflutter{0%{transform:rotate(0deg) scaleX(1)}25%{transform:rotate(75deg) scaleX(.55)}50%{transform:rotate(150deg) scaleX(1)}75%{transform:rotate(225deg) scaleX(.6)}100%{transform:rotate(310deg) scaleX(1)}}
+.fxsnow{border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,1) 0%,rgba(255,255,255,.85) 55%,rgba(255,255,255,0) 75%);box-shadow:0 0 7px rgba(255,255,255,.75)}
+.fxrain{width:2px;background:linear-gradient(rgba(125,211,252,0),rgba(56,189,248,.85));border-radius:2px;opacity:.55;transform:rotate(7deg)}
+.fxpetal{box-shadow:inset 0 0 6px rgba(0,0,0,.07),0 1px 3px rgba(0,0,0,.12);border-radius:90% 4px 90% 4px}
+.fxpetal.mai{background:radial-gradient(circle at 32% 30%,#fef9c3,#facc15 62%,#eab308)}
+.fxpetal.dao{background:radial-gradient(circle at 32% 30%,#fdf2f8,#f9a8d4 62%,#f472b6)}
+.fxheart{position:relative;display:block;background:linear-gradient(135deg,#fb7185,#e11d48);transform:rotate(-45deg);border-radius:18%}
+.fxheart::before,.fxheart::after{content:'';position:absolute;width:100%;height:100%;background:inherit;border-radius:50%}
+.fxheart::before{top:-52%;left:0}
+.fxheart::after{top:0;left:52%}
+.fxbc{border:2px solid #166534;border-radius:5px;background:linear-gradient(45deg,transparent 46%,#fef08a 46%,#fef08a 54%,transparent 54%),linear-gradient(-45deg,transparent 46%,#fef08a 46%,#fef08a 54%,transparent 54%),#15803d;box-shadow:0 2px 5px rgba(0,0,0,.18)}
+.fxemoji{filter:drop-shadow(0 4px 4px rgba(0,0,0,.25))}
+.uname-free{color:#111;font-weight:700}
+.uname-pro{color:#7c3aed;font-weight:800}
+.uname-custom{font-weight:800;background-image:linear-gradient(90deg,#3b82f6,#8b5cf6,#ec4899);-webkit-background-clip:text;background-clip:text;color:transparent}
+.uname-ultra{font-weight:800;background-image:linear-gradient(110deg,transparent 42%,rgba(255,255,255,.9) 50%,transparent 58%),linear-gradient(90deg,#3b82f6,#22c55e,#8b5cf6,#ec4899,#f97316,#3b82f6);background-size:220% 100%,220% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:rainbowShine 5s linear infinite}
+.uavatar{border-radius:50%;object-fit:cover}
