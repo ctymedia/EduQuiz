@@ -520,9 +520,11 @@ function renderContestHub(){
   <div class="row" style="align-items:stretch">
   ${can('host')?`<button class="btn grow" id="ctLive" style="padding:22px;font-size:18px;background:#ffedd5;color:#7c2d12;border:2px solid #fdba74">📺<br>Trực tiếp<br><span class="small" style="font-weight:400">Chế độ tổ chức chơi trực tiếp bằng mã PIN như hiện tại — vào Thư viện, chọn bộ đề rồi bấm nút Cuộc thi</span></button>`:''}
   ${can('create')?`<button class="btn grow" id="ctAsync" style="padding:22px;font-size:18px;background:#ccfbf1;color:#134e4a;border:2px solid #5eead4">🕒<br>Gián tiếp<br><span class="small" style="font-weight:400">Chế độ cuộc thi theo khung giờ như hiện tại — đặt giờ mở/đóng phòng, mật mã, số lần làm lại, học sinh tự vào làm bài</span></button>`:''}
+  ${can('create')?`<button class="btn grow" id="ctHw" style="padding:22px;font-size:18px;background:#dbeafe;color:#1e3a8a;border:2px solid #93c5fd">📚<br>Bài tập<br><span class="small" style="font-weight:400">Chế độ bài tập — tổng thời gian và tổng điểm do thầy/cô đặt, đúng có điểm sai 0 điểm, học sinh làm theo danh sách câu hỏi và chỉ xem được điểm của mình</span></button>`:''}
   </div>${(!can('host')&&!can('create'))?'<p class="small">Tài khoản của thầy/cô chưa được cấp quyền tổ chức cuộc thi. Vui lòng liên hệ admin.</p>':''}</div>`;
   const l=$('#ctLive'); if(l) l.onclick=()=>renderLibrary();
   const a=$('#ctAsync'); if(a) a.onclick=()=>renderContests();
+  const h=$('#ctHw'); if(h) h.onclick=()=>renderHomework();
 }
 function renderCreate(prefill, title0, subject0, editId, cover0, bg0, cFade0, bFade0){
   let questions = prefill ? structuredClone(prefill) : [emptyQ()];
@@ -1127,13 +1129,60 @@ async function contestResults(code){
 }
 
 // Màn hình giáo viên: tạo + quản lý cuộc thi
+
+// Màn hình giáo viên: tạo + quản lý BÀI TẬP (chế độ thứ 3, tách riêng khỏi cuộc thi gián tiếp)
+async function renderHomework(){
+  const quizzes = (await store.listQuizzes()).filter(q=>me?.role==='admin'||!q.ownerUid||q.ownerUid===me?.uid);
+  const classes = (await store.listClasses()).filter(c=>me?.role==='admin'||c.ownerUid===me?.uid);
+  const mine = (await contestList()).filter(c=>(me?.role==='admin'||c.ownerUid===me?.uid) && c.mode==='homework');
+  const now = Date.now();
+  const statusOf = c => c.closed ? '<b style="color:#e11d48">🔒 Đã đóng</b>' : now < c.startAt ? '<b style="color:#d97706">Chưa mở</b>' : now > c.endAt ? '<b style="color:#e11d48">Đã đóng</b>' : '<b style="color:#16a34a">Đang mở</b>';
+  app.innerHTML = `<div class="card"><h1>📚 Tạo bài tập</h1>
+  <label class="small"><b>Chọn bộ đề</b></label>
+  <select id="hwQuiz">${quizzes.map(q=>`<option value="${q.id}">${esc(q.title)} (${q.questions.length} câu)</option>`).join('')||'<option value="">— Chưa có bộ đề nào —</option>'}</select>
+  <label class="small"><b>Chọn lớp</b> (không bắt buộc — chọn 1 hoặc nhiều lớp; nếu có chọn lớp, học sinh phải <b>chọn lớp rồi chọn tên theo danh sách lớp</b>, không tự nhập biệt danh)</label>
+  <div id="hwClassBox" style="margin:4px 0 10px">${classes.length? classes.map(c=>`<label class="small" style="margin-right:16px"><input type="checkbox" data-hwclass="${c.id}" style="width:auto"> ${esc(c.name)}</label>`).join('') : '<span class="small">Chưa có lớp nào — tạo lớp ở mục 🏫 Lớp học nếu muốn học sinh chọn tên theo lớp.</span>'}</div>
+  <div class="row"><label class="small grow">Mở bài từ ngày giờ <input id="hwStart" type="datetime-local" value="${dtLocal(now)}"></label>
+  <label class="small grow">Đến ngày giờ <input id="hwEnd" type="datetime-local" value="${dtLocal(now+7*24*3600*1000)}"></label></div>
+  <div class="row"><label class="small grow">Tổng thời gian làm bài (phút) <input id="hwMinutes" type="number" value="45" min="1" max="600" style="width:110px"></label>
+  <label class="small grow">Tổng điểm của cả bài (điểm) <input id="hwPoints" type="number" value="100" min="1" max="10000" style="width:110px"></label>
+  <label class="small">Số lần làm lại tối đa <input id="hwAttempts" type="number" value="1" min="1" max="10" style="width:90px"></label></div>
+  <div class="row"><label class="small grow">Mật mã phòng (không bắt buộc) <input id="hwPass" placeholder="Để trống nếu không đặt mật mã"></label>
+  <label class="small">Số câu mỗi lần làm (0 = tất cả) <input id="hwNumQ" type="number" value="0" min="0" max="100" style="width:90px"></label></div>
+  <label class="small" style="display:block"><input type="checkbox" id="hwAnti" checked style="width:auto"> ⚠️ Bật chống gian lận (ghi số lần học sinh rời màn hình vào thống kê)</label>
+  <button class="btn green" id="hwCreate">📚 Tạo bài tập</button>
+  <p class="small">Chế độ bài tập: mỗi câu đúng được <b>tổng điểm ÷ số câu</b> điểm, sai 0 điểm; không tính giờ từng câu — chỉ tính <b>tổng thời gian</b> của cả bài. Học sinh làm theo danh sách câu hỏi bên phải màn hình, nộp bài xong <b>chỉ xem được điểm của mình</b>. Học sinh vào bằng <b>mã phòng 6 số</b> tại Trang chủ hoặc quét QR / bấm liên kết ở mỗi bài tập bên dưới.</p></div>
+  <div class="card"><h2>Bài tập của tôi (${mine.length})</h2>
+  ${mine.length? mine.map(c=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(c.title)}</b> ${statusOf(c)}<br><span class="small">Mã phòng: <b style="font-size:18px">${esc(c.code)}</b> • ${esc(c.className||'Không chọn lớp')} • ${c.questions?.length||0} câu • ⏱️ ${c.totalMinutes||45} phút • Tổng ${c.totalPoints||100} điểm • Tối đa ${c.maxAttempts||1} lần làm${c.numQuestions>0?` • Mỗi lần làm ${c.numQuestions} câu ngẫu nhiên`:''}<br>Từ ${fmtDT(c.startAt)} đến ${fmtDT(c.endAt)}${c.password?' • Có mật mã':''}</span></div>
+  <button class="btn light" data-hwshare="${c.code}">📱 QR / Liên kết</button><button class="btn" data-hwstats="${c.code}">📊 Thống kê</button>${c.closed?'':`<button class="btn gray" data-hwclose="${c.code}">🔒 Đóng</button>`}<button class="btn red" data-hwdel="${c.code}">Xóa</button></div>
+  <div data-hwsharebox="${c.code}" style="display:none;text-align:center">${shareRoomHtml(c.code, 150)}</div></div>`).join('') : '<p class="small">Chưa có bài tập nào.</p>'}</div>`;
+  $('#hwCreate').onclick = async()=>{
+    const quiz = quizzes.find(q=>q.id===$('#hwQuiz').value); if(!quiz) return alert('Thầy/cô chưa có bộ đề nào. Tạo bộ đề trước nhé!');
+    const startAt = new Date($('#hwStart').value).getTime(), endAt = new Date($('#hwEnd').value).getTime();
+    if(!startAt||!endAt||endAt<=startAt) return alert('Khung giờ chưa hợp lệ: giờ kết thúc phải sau giờ bắt đầu.');
+    const selCls = classes.filter(c=>app.querySelector(`[data-hwclass="${c.id}"]`)?.checked);
+    const code = await contestCreate({ cover: quiz.cover||'', contestBg: quiz.contestBg||'', bgFade: quiz.bgFade??85, quizId: quiz.id, title: quiz.title, subject: quiz.subject||'', questions: quiz.questions,
+      classId: selCls[0]?.id||'', classIds: selCls.map(c=>c.id), className: selCls.map(c=>c.name).join(', '), startAt, endAt, password: $('#hwPass').value.trim(),
+      maxAttempts: Math.max(1,Math.min(10,+$('#hwAttempts').value||1)), antiCheat: $('#hwAnti').checked, numQuestions: Math.max(0,+$('#hwNumQ').value||0), showLeaderboard: false,
+      mode: 'homework', totalMinutes: Math.max(1,+$('#hwMinutes').value||45), totalPoints: Math.max(1,+$('#hwPoints').value||100),
+      ownerUid: me?.uid||'', ownerEmail: me?.email||'', createdAt: Date.now() });
+    alert('Đã tạo bài tập! Mã phòng: '+code+'\nThầy/cô gửi mã này cho học sinh, hoặc bấm nút "📱 QR / Liên kết" ở bài tập vừa tạo để chép liên kết / cho học sinh quét mã QR vào thẳng bài tập trong khung giờ đã đặt.');
+    renderHomework();
+  };
+  app.querySelectorAll('[data-hwshare]').forEach(b=>b.onclick=()=>{ const el=app.querySelector(`[data-hwsharebox="${b.dataset.hwshare}"]`); el.style.display = el.style.display==='none'?'block':'none'; });
+  wireShareRoom(app);
+  app.querySelectorAll('[data-hwstats]').forEach(b=>b.onclick=()=>renderContestStats(b.dataset.hwstats));
+  app.querySelectorAll('[data-hwdel]').forEach(b=>b.onclick=async()=>{ if(confirm('Xóa bài tập này và toàn bộ kết quả của học sinh?')){ await contestDelete(b.dataset.hwdel); renderHomework(); } });
+  app.querySelectorAll('[data-hwclose]').forEach(b=>b.onclick=async()=>{ if(confirm('Đóng bài tập này? Học sinh sẽ không vào làm bài được nữa.')){ await contestPatch(b.dataset.hwclose,{closed:true}); renderHomework(); } });
+}
+
 async function renderContests(){
   const quizzes = (await store.listQuizzes()).filter(q=>me?.role==='admin'||!q.ownerUid||q.ownerUid===me?.uid);
   const classes = (await store.listClasses()).filter(c=>me?.role==='admin'||c.ownerUid===me?.uid);
-  const mine = (await contestList()).filter(c=>me?.role==='admin'||c.ownerUid===me?.uid);
+  const mine = (await contestList()).filter(c=>(me?.role==='admin'||c.ownerUid===me?.uid) && c.mode!=='homework');
   const now = Date.now();
   const statusOf = c => c.closed ? '<b style="color:#e11d48">🔒 Đã đóng</b>' : now < c.startAt ? '<b style="color:#d97706">Chưa mở</b>' : now > c.endAt ? '<b style="color:#e11d48">Đã đóng</b>' : '<b style="color:#16a34a">Đang mở</b>';
-  app.innerHTML = `<div class="card"><h1>🏆 Tạo cuộc thi</h1>
+  app.innerHTML = `<div class="card"><h1>🕒 Tạo cuộc thi gián tiếp</h1>
   <label class="small"><b>Chọn bộ đề</b></label>
   <select id="ctQuiz">${quizzes.map(q=>`<option value="${q.id}">${esc(q.title)} (${q.questions.length} câu)</option>`).join('')||'<option value="">— Chưa có bộ đề nào —</option>'}</select>
   <label class="small"><b>Chọn lớp</b> (không bắt buộc — chọn 1 hoặc nhiều lớp; nếu có chọn lớp, học sinh phải <b>chọn lớp rồi chọn tên theo danh sách lớp</b>, không tự nhập biệt danh)</label>
@@ -1145,19 +1194,12 @@ async function renderContests(){
   <label class="small" style="display:block"><input type="checkbox" id="ctAnti" checked style="width:auto"> ⚠️ Bật chống gian lận (rời màn hình khi đang làm: điểm câu đó còn 50%, ghi số lần vào thống kê)</label>
   <label class="small"><b>Số câu hỏi mỗi lần thi</b> — để <b>0</b> là lấy tất cả câu trong bộ đề; nếu đặt số, mỗi lần làm bài hệ thống tự chọn ngẫu nhiên đủ số câu đó và xáo trộn thứ tự câu lẫn phương án <input id="ctNumQ" type="number" value="0" min="0" max="100" style="width:90px"></label>
   <label class="small" style="display:block"><input type="checkbox" id="ctShowBoard" style="width:auto"> 🏆 Cho học sinh xem bảng xếp hạng đầy đủ sau khi nộp bài (thứ hạng, tên, thời gian làm bài, điểm)</label>
-  <label class="small" style="display:block"><b>Chế độ làm bài:</b> <select id="ctMode" style="width:auto"><option value="contest">🏆 Thi gián tiếp (mỗi câu có giờ riêng, tính điểm theo tốc độ)</option><option value="homework">📚 Bài tập (tổng thời gian chung, đúng có điểm — sai 0 điểm)</option></select></label>
-  <div id="ctHwBox" style="display:none">
-    <div class="row"><label class="small grow">Tổng thời gian làm bài (phút) <input id="ctHwMinutes" type="number" value="45" min="1" max="600" style="width:110px"></label>
-    <label class="small grow">Tổng điểm của cả bài (điểm) <input id="ctHwPoints" type="number" value="100" min="1" max="10000" style="width:110px"></label></div>
-    <p class="small">Chế độ bài tập: học sinh làm theo <b>danh sách câu hỏi bên phải màn hình</b> (câu đã làm có nền xanh nhạt), mỗi câu đúng được <b>tổng điểm ÷ số câu</b> điểm, sai 0 điểm. Nộp bài xong học sinh <b>chỉ xem được điểm của mình</b>.</p>
-  </div>
   <button class="btn green" id="ctCreate">🏆 Tạo cuộc thi</button> <span id="ctMsg" class="small"></span>
   <p class="small">Học sinh vào bằng <b>mã phòng thi 6 số</b> tại Trang chủ, hoặc bấm nút <b>📱 QR / Liên kết</b> ở mỗi cuộc thi bên dưới để lấy mã QR / liên kết vào thẳng phòng thi (không cần nhập mã). Ngoài khung giờ trên, học sinh không vào được phòng thi.</p></div>
-  <div class="card"><h2>Cuộc thi của tôi (${mine.length})</h2>
-  ${mine.length? mine.map(c=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(c.title)}</b> ${statusOf(c)}<br><span class="small">Mã phòng thi: <b style="font-size:18px">${esc(c.code)}</b> • ${esc(c.className||'Không chọn lớp')} • ${c.questions?.length||0} câu • Tối đa ${c.maxAttempts||1} lần làm${c.numQuestions>0?` • Mỗi lần thi ${c.numQuestions} câu ngẫu nhiên`:''}${c.mode==='homework'?` • 📚 Bài tập: ${c.totalMinutes||45} phút, tổng ${c.totalPoints||100} điểm`:''}${c.showLeaderboard&&c.mode!=='homework'?' • HS xem được BXH':''}<br>Từ ${fmtDT(c.startAt)} đến ${fmtDT(c.endAt)}${c.password?' • Có mật mã':''}</span></div>
+  <div class="card"><h2>Cuộc thi gián tiếp của tôi (${mine.length})</h2>
+  ${mine.length? mine.map(c=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(c.title)}</b> ${statusOf(c)}<br><span class="small">Mã phòng thi: <b style="font-size:18px">${esc(c.code)}</b> • ${esc(c.className||'Không chọn lớp')} • ${c.questions?.length||0} câu • Tối đa ${c.maxAttempts||1} lần làm${c.numQuestions>0?` • Mỗi lần thi ${c.numQuestions} câu ngẫu nhiên`:''}${c.showLeaderboard?' • HS xem được BXH':''}<br>Từ ${fmtDT(c.startAt)} đến ${fmtDT(c.endAt)}${c.password?' • Có mật mã':''}</span></div>
   <button class="btn light" data-share="${c.code}">📱 QR / Liên kết</button><button class="btn" data-stats="${c.code}">📊 Thống kê</button>${c.closed?'':`<button class="btn gray" data-closect="${c.code}">🔒 Đóng</button>`}<button class="btn red" data-delct="${c.code}">Xóa</button></div>
   <div data-sharebox="${c.code}" style="display:none;text-align:center">${shareRoomHtml(c.code, 150)}</div></div>`).join('') : '<p class="small">Chưa có cuộc thi nào.</p>'}</div>`;
-  const ctMd=$('#ctMode'); if(ctMd) ctMd.onchange=()=>{ $('#ctHwBox').style.display = ctMd.value==='homework'?'block':'none'; };
   $('#ctCreate').onclick = async()=>{
     const quiz = quizzes.find(q=>q.id===$('#ctQuiz').value); if(!quiz) return alert('Thầy/cô chưa có bộ đề nào. Tạo bộ đề trước nhé!');
     const startAt = new Date($('#ctStart').value).getTime(), endAt = new Date($('#ctEnd').value).getTime();
@@ -1165,7 +1207,7 @@ async function renderContests(){
     const selCls = classes.filter(c=>app.querySelector(`[data-ctclass="${c.id}"]`)?.checked);
     const code = await contestCreate({ cover: quiz.cover||'', contestBg: quiz.contestBg||'', bgFade: quiz.bgFade??85, quizId: quiz.id, title: quiz.title, subject: quiz.subject||'', questions: quiz.questions,
       classId: selCls[0]?.id||'', classIds: selCls.map(c=>c.id), className: selCls.map(c=>c.name).join(', '), startAt, endAt, password: $('#ctPass').value.trim(),
-      maxAttempts: Math.max(1,Math.min(10,+$('#ctAttempts').value||1)), antiCheat: $('#ctAnti').checked, numQuestions: Math.max(0,+$('#ctNumQ').value||0), showLeaderboard: $('#ctShowBoard').checked, mode: $('#ctMode').value, totalMinutes: Math.max(1,+$('#ctHwMinutes').value||45), totalPoints: Math.max(1,+$('#ctHwPoints').value||100),
+      maxAttempts: Math.max(1,Math.min(10,+$('#ctAttempts').value||1)), antiCheat: $('#ctAnti').checked, numQuestions: Math.max(0,+$('#ctNumQ').value||0), showLeaderboard: $('#ctShowBoard').checked, mode: 'contest',
       ownerUid: me?.uid||'', ownerEmail: me?.email||'', createdAt: Date.now() });
     alert('Đã tạo cuộc thi! Mã phòng thi: '+code+'\nThầy/cô gửi mã này cho học sinh, hoặc bấm nút "📱 QR / Liên kết" ở cuộc thi vừa tạo để chép liên kết / cho học sinh quét mã QR vào thẳng phòng thi trong khung giờ đã đặt.');
     renderContests();
@@ -1398,11 +1440,11 @@ async function renderReports(){
   const open = all.filter(ct=>mineCt(ct) && !ct.closed && now>=ct.startAt && now<=ct.endAt).sort((a,b)=>(a.endAt||0)-(b.endAt||0));
   app.innerHTML=`<div class="card"><h1>📊 Báo cáo</h1>
   <h2>🏁 Các cuộc thi đã kết thúc (${ended.length})</h2>
-  ${ended.length? ended.map(ct=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(ct.title)}</b> ${ct.closed?'<b style="color:#e11d48">🔒 Đã đóng</b>':'<span class="small">(đã hết giờ)</span>'}<br><span class="small">Mã phòng thi ${esc(ct.code)} • ${fmtDT(ct.startAt)} → ${fmtDT(ct.endAt)} • Đã có <span data-repcount="${esc(ct.code)}">…</span> lượt làm bài</span></div>
+  ${ended.length? ended.map(ct=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(ct.title)}</b>${ct.mode==='homework'?' <span class="tag">📚 Bài tập</span>':''} ${ct.closed?'<b style="color:#e11d48">🔒 Đã đóng</b>':'<span class="small">(đã hết giờ)</span>'}<br><span class="small">Mã phòng thi ${esc(ct.code)} • ${fmtDT(ct.startAt)} → ${fmtDT(ct.endAt)} • Đã có <span data-repcount="${esc(ct.code)}">…</span> lượt làm bài</span></div>
   <button class="btn" data-endedview="${esc(ct.code)}">📊 Xem bảng xếp hạng</button></div></div>`).join('') : '<p class="small">Chưa có cuộc thi nào đã kết thúc.</p>'}
   <h2>🏆 Các cuộc thi đang mở (${open.length})</h2>
   <p class="small">Các cuộc thi đang trong khung giờ mở. Thầy/cô có thể xem bảng xếp hạng, sửa thông tin hoặc đóng phòng thi ngay tại đây.</p>
-  ${open.length? open.map(ct=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(ct.title)}</b> <b style="color:#16a34a">● Đang mở</b><br><span class="small">Mã phòng thi ${esc(ct.code)} • Đóng lúc: ${fmtDT(ct.endAt)} • Đã có <span data-repcount="${esc(ct.code)}">…</span> lượt làm bài</span></div>
+  ${open.length? open.map(ct=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(ct.title)}</b>${ct.mode==='homework'?' <span class="tag">📚 Bài tập</span>':''} <b style="color:#16a34a">● Đang mở</b><br><span class="small">Mã phòng thi ${esc(ct.code)} • Đóng lúc: ${fmtDT(ct.endAt)} • Đã có <span data-repcount="${esc(ct.code)}">…</span> lượt làm bài</span></div>
   <button class="btn" data-repview="${esc(ct.code)}">👁️ Xem</button><button class="btn light" data-repedit="${esc(ct.code)}">✏️ Sửa</button><button class="btn red" data-repclose="${esc(ct.code)}">🔒 Đóng</button></div></div>`).join('') : '<p class="small">Hiện không có cuộc thi nào đang mở. Vào mục 🏆 Cuộc thi → Gián tiếp để tạo và mở cuộc thi mới nhé.</p>'}
   </div>`;
   app.querySelectorAll('[data-endedview]').forEach(b=>b.onclick=()=>renderContestStats(b.dataset.endedview));
