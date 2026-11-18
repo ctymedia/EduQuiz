@@ -111,12 +111,11 @@ function checkAccess(p){
 
 // ---------- Khởi tạo ----------
 async function init(){
-  if (DEMO){ $('#syncStatus').textContent='⚠️ Chế độ demo (chưa nối Firebase)'; me={uid:'demo',email:'demo@eduquiz.local',displayName:'Giáo viên demo',role:'admin',status:'approved',plan:'ultra',features:defaultFeatures(),expiresAt:null}; initSettings(); paintAuth(); renderHome(); if(!maybeDeepLink()) maybeResumeLive(); return; }
+  if (DEMO){ me={uid:'demo',email:'demo@eduquiz.local',displayName:'Giáo viên demo',role:'admin',status:'approved',plan:'ultra',features:defaultFeatures(),expiresAt:null}; initSettings(); paintAuth(); renderHome(); if(!maybeDeepLink()) maybeResumeLive(); return; }
   const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
   F = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
   A = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
   const fbApp = initializeApp(firebaseConfig); db = F.getFirestore(fbApp); auth = A.getAuth(fbApp);
-  $('#syncStatus').textContent='☁️ Đã nối Firebase — đồng bộ mọi thiết bị';
   await loadPlans();
   initSettings();
   A.onAuthStateChanged(auth, async user=>{
@@ -188,11 +187,16 @@ function renderProfile(){
     paintAuth(); $('#profMsg').textContent='✔ Đã lưu avatar mới!'; };
 }
 function paintAuth(){ const el=$('#authArea'); if(!el) return; paintNav();
-  $('#adminBtn').style.display = me?.role==='admin' ? '' : 'none';
-  el.innerHTML = me ? `<span style="display:inline-flex;align-items:center;gap:7px"><span id="myAvatar" ${can('avatar')?'style="cursor:pointer" title="Bấm để đổi avatar"':''}>${avatarHtml(me,30)}</span><span class="${nameClass(me)}">${esc(me.displayName||me.email)}</span></span> <button id="logoutBtn">Đăng xuất</button>`
+  const lg0=$('#logoHome'); if(lg0){ lg0.onclick=()=>{ if(me?.role==='admin'){ stopListen(); renderAdmin('members'); } }; lg0.style.cursor = me?.role==='admin' ? 'pointer' : 'default'; lg0.title = me?.role==='admin' ? 'Bấm để mở Quản trị' : ''; }
+  el.innerHTML = me ? `<span style="position:relative;display:inline-block;text-align:left"><span style="display:inline-flex;align-items:center;gap:7px"><span id="myAvatar" ${can('avatar')?'style="cursor:pointer" title="Bấm để đổi avatar"':''}>${avatarHtml(me,30)}</span><span id="myName" class="${nameClass(me)}" style="cursor:pointer" title="Bấm để xem thông tin tài khoản">${esc(me.displayName||me.email)} ▾</span></span><span id="userMenu" style="display:none;position:absolute;right:0;top:calc(100% + 10px);background:#fff;border:2px solid #e9d5ff;border-radius:12px;box-shadow:0 12px 32px #0003;padding:12px 14px;min-width:240px;z-index:3000"><span class="small" style="display:block">Gói thành viên: <b class="${nameClass(me)}">${esc(myPlan().name)}</b></span><span class="small" style="display:block;margin-top:4px">Hạn sử dụng: <b>${me.expiresAt?fmtDate(me.expiresAt):'Không giới hạn'}</b></span>${me.role==='admin'?'<span class="small" style="display:block;margin-top:4px">Vai trò: <b>👑 Admin</b></span>':''}<button id="menuLogout" class="btn red" style="width:100%;margin-top:10px;padding:7px 10px;font-size:14px">🚪 Đăng xuất</button></span></span>`
                     : `<button id="loginBtn">Đăng nhập</button> <button id="regBtn">Đăng ký</button>`;
-  if (me){ $('#logoutBtn').onclick=async()=>{ stopListen(); if(!DEMO) await A.signOut(auth); me=null; paintAuth(); renderHome(); };
-    const avEl=$('#myAvatar'); if(avEl && can('avatar')) avEl.onclick=()=>renderProfile(); }
+  if (me){ $('#menuLogout').onclick=async()=>{ stopListen(); if(!DEMO) await A.signOut(auth); me=null; paintAuth(); renderHome(); };
+    const avEl=$('#myAvatar'); if(avEl && can('avatar')) avEl.onclick=()=>renderProfile();
+    const nm=$('#myName'), um=$('#userMenu');
+    if(nm&&um){ nm.onclick=e=>{ e.stopPropagation(); um.style.display = um.style.display==='none' ? 'block' : 'none'; };
+      if(window.__umClose) document.removeEventListener('click', window.__umClose);
+      window.__umClose = e=>{ const m=document.getElementById('userMenu'); if(m && !m.contains(e.target)) m.style.display='none'; };
+      document.addEventListener('click', window.__umClose); } }
   else { $('#loginBtn').onclick=()=>renderLogin(); $('#regBtn').onclick=()=>renderRegister(); }
 }
 document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{ stopListen(); const n=b.dataset.nav;
