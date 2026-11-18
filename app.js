@@ -104,7 +104,7 @@ function checkAccess(p){
 
 // ---------- Khởi tạo ----------
 async function init(){
-  if (DEMO){ $('#syncStatus').textContent='⚠️ Chế độ demo (chưa nối Firebase)'; me={uid:'demo',email:'demo@eduquiz.local',displayName:'Giáo viên demo',role:'admin',status:'approved',plan:'ultra',features:defaultFeatures(),expiresAt:null}; paintAuth(); renderHome(); return; }
+  if (DEMO){ $('#syncStatus').textContent='⚠️ Chế độ demo (chưa nối Firebase)'; me={uid:'demo',email:'demo@eduquiz.local',displayName:'Giáo viên demo',role:'admin',status:'approved',plan:'ultra',features:defaultFeatures(),expiresAt:null}; paintAuth(); renderHome(); maybeDeepLink(); return; }
   const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
   F = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
   A = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
@@ -112,7 +112,7 @@ async function init(){
   $('#syncStatus').textContent='☁️ Đã nối Firebase — đồng bộ mọi thiết bị';
   await loadPlans();
   A.onAuthStateChanged(auth, async user=>{
-    if (!user){ me=null; paintAuth(); renderHome(); return; }
+    if (!user){ me=null; paintAuth(); renderHome(); maybeDeepLink(); return; }
     const snap = await F.getDoc(F.doc(db,'users',user.uid));
     if (!snap.exists()){ await A.signOut(auth); me=null; paintAuth(); alert('Tài khoản này chưa có hồ sơ hoặc đã bị xoá bởi admin. Vui lòng đăng ký lại và chờ phê duyệt.'); renderHome(); return; }
     me = { uid:user.uid, ...snap.data() };
@@ -120,7 +120,7 @@ async function init(){
     if (chk!==true){ await A.signOut(auth); me=null; paintAuth(); alert(chk); renderHome(); return; }
     await F.updateDoc(F.doc(db,'users',user.uid), { lastLoginAt: Date.now() });
     await registerDevice(me.uid);
-    paintAuth(); renderHome();
+    paintAuth(); renderHome(); maybeDeepLink();
   });
   renderHome();
 }
@@ -249,6 +249,49 @@ function avatarPickerHtml(id){ return `<div class="row" id="${id}" style="justif
 function wireAvatarPicker(id){ let sel = AVATARS[0]; const box = document.getElementById(id); if(!box) return ()=>sel;
   box.querySelectorAll('[data-av]').forEach(b=>b.onclick=()=>{ sel=b.dataset.av; box.querySelectorAll('[data-av]').forEach(x=>x.classList.add('light')); b.classList.remove('light'); });
   return ()=>sel; }
+// ---------- Vào phòng bằng liên kết / mã QR (không cần nhập mã) ----------
+// Liên kết vào phòng có dạng: <địa chỉ trang>?code=123456 — mở liên kết hoặc quét mã QR là vào thẳng màn hình nhập biệt danh/avatar.
+function roomLink(code){ return location.origin + location.pathname + '?code=' + encodeURIComponent(code); }
+function extractRoomCode(text){
+  const t = String(text||'').trim(); if(!t) return '';
+  const m = t.match(/[?&#](?:code|pin|room)=(\d{6})\b/) || t.match(/\b(\d{6})\b/);
+  return m ? m[1] : '';
+}
+function qrImgHtml(code, size){
+  const s = size||180;
+  return `<img alt="Mã QR vào phòng ${esc(code)}" width="${s}" height="${s}" style="background:#fff;border:1px solid #ddd;border-radius:10px;padding:4px" src="https://api.qrserver.com/v1/create-qr-code/?size=${s}x${s}&margin=6&data=${encodeURIComponent(roomLink(code))}">`;
+}
+async function copyRoomLink(code, btn){
+  const link = roomLink(code);
+  try{ await navigator.clipboard.writeText(link); }
+  catch{ const ta=document.createElement('textarea'); ta.value=link; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); }catch{} ta.remove(); }
+  if (btn){ const old=btn.textContent; btn.textContent='✔ Đã chép liên kết'; setTimeout(()=>{ btn.textContent=old; },2000); }
+}
+function shareRoomHtml(code, size){
+  return `<div style="margin-top:12px"><p class="small" style="margin:4px 0"><b>📱 Vào phòng ngay không cần nhập mã:</b> học sinh quét mã QR bằng camera điện thoại, hoặc bấm vào liên kết được gửi (Zalo, tin nhắn…):</p>
+  ${qrImgHtml(code, size)}
+  <input readonly value="${esc(roomLink(code))}" onclick="this.select()" style="text-align:center;margin-top:8px;font-size:13px">
+  <div class="row" style="justify-content:center;margin-top:6px"><button class="btn light" type="button" data-copylink="${esc(code)}">🔗 Sao chép liên kết vào phòng</button></div></div>`;
+}
+function wireShareRoom(root){
+  (root||app).querySelectorAll('[data-copylink]').forEach(b=>b.onclick=()=>copyRoomLink(b.dataset.copylink, b));
+}
+async function enterRoomByCode(code){
+  const s = await store.getSession(code); if (s) return renderJoinSetup(code);
+  const ct = await contestGet(code); if (ct) return renderContestGate(code);
+  alert('Không tìm thấy phòng nào với mã này. Em kiểm tra lại mã giúp thầy/cô nhé!');
+  return false;
+}
+// Mở liên kết ?code=... là tự vào phòng ngay (chỉ xử lý 1 lần khi trang vừa tải)
+function maybeDeepLink(){
+  if (window.__eqDlDone) return;
+  const code = extractRoomCode(location.href);
+  if (!code) return;
+  window.__eqDlDone = true;
+  try{ history.replaceState(null,'',location.pathname); }catch{}
+  enterRoomByCode(code);
+}
+
 // Man hinh nhap biet danh + chon avatar cho phong choi truc tiep (PIN)
 function renderJoinSetup(pin){
   app.innerHTML = `<div class="card join"><h1>🎮 Sắp vào phòng rồi!</h1><p class="small">Mã phòng: <b>${pin}</b> • Em nhập biệt danh và chọn một avatar ngộ nghĩnh nhé</p>
@@ -261,18 +304,35 @@ function renderJoinSetup(pin){
 }
 function renderHome(){
   app.innerHTML=`${DEMO?'<div class="notice"><b>Đang ở chế độ demo.</b></div>':''}
-  <div class="card join"><h1>🎓 EduQuiz</h1><p class="small">Nhập mã phòng do giáo viên cung cấp — mã PIN trò chơi hay mã phòng thi đều dùng chung ô này, không cần tài khoản</p>
-  <input id="roomCode" inputmode="numeric" maxlength="6" placeholder="Mã phòng 6 số" style="text-align:center;font-size:24px;font-weight:800;letter-spacing:4px">
-  <button class="btn green" style="width:100%;margin-top:10px" id="enterBtn">Vào phòng →</button></div>
+  <div class="card join"><h1>🎓 EduQuiz</h1><p class="small">Nhập mã phòng do giáo viên cung cấp — mã PIN trò chơi hay mã phòng thi đều dùng chung ô này, không cần tài khoản. Có liên kết vào phòng thì dán thẳng vào ô dưới, hoặc quét mã QR là vào ngay.</p>
+  <input id="roomCode" placeholder="Mã phòng 6 số hoặc dán liên kết vào phòng" style="text-align:center;font-size:20px;font-weight:800;letter-spacing:2px">
+  <button class="btn green" style="width:100%;margin-top:10px" id="enterBtn">Vào phòng →</button>
+  <button class="btn light" style="width:100%;margin-top:8px" id="scanBtn" type="button">📷 Quét mã QR vào phòng ngay</button>
+  <div id="qrScanBox" style="display:none;margin-top:10px"><div id="qrReader" style="max-width:340px;margin:0 auto"></div>
+  <button class="btn red" style="width:100%;margin-top:8px" id="scanStop" type="button">✖ Đóng camera</button>
+  <p class="small">Hướng camera vào mã QR của thầy/cô — quét được là vào phòng ngay, không cần nhập mã. Nếu máy hỏi quyền dùng camera, em chọn “Cho phép” nhé.</p></div></div>
   <div class="card center"><h2>Thầy/cô tổ chức trò chơi?</h2><p class="small">${me?`Đang đăng nhập: <b>${esc(me.displayName||me.email)}</b> • Gói <b>${esc(myPlan().name)}</b> • Hạn dùng: ${fmtDate(me.expiresAt)}`:'Đăng nhập để tạo thư viện và kho câu hỏi riêng. Chưa có tài khoản thì Đăng ký — admin phê duyệt xong mới đăng nhập được và tự động dùng gói Free.'}</p>
   <button class="btn" onclick="document.querySelector('[data-nav=library]').click()">Mở thư viện của tôi →</button></div>`;
-  const go = async()=>{ const code = $('#roomCode').value.trim();
-    if (code.length!==6) return alert('Em nhập mã phòng đủ 6 số nhé!');
-    const s = await store.getSession(code); if (s) return renderJoinSetup(code);
-    const ct = await contestGet(code); if (ct) return renderContestGate(code);
-    alert('Không tìm thấy phòng nào với mã này. Em kiểm tra lại mã giúp thầy/cô nhé!'); };
+  const go = async()=>{ const code = extractRoomCode($('#roomCode').value);
+    if (!code) return alert('Em nhập mã phòng đủ 6 số, hoặc dán liên kết vào phòng, hoặc bấm nút quét mã QR nhé!');
+    await enterRoomByCode(code); };
   $('#enterBtn').onclick = go;
   $('#roomCode').addEventListener('keydown', e=>{ if (e.key==='Enter') go(); });
+  $('#roomCode').addEventListener('paste', ()=>setTimeout(()=>{ if (extractRoomCode($('#roomCode').value)) go(); }, 50));
+  // Quét mã QR bằng camera (thư viện Html5Qrcode nạp từ index.html)
+  let qrScanner = null;
+  const stopScan = async()=>{ try{ if (qrScanner) await qrScanner.stop(); }catch{} try{ qrScanner?.clear(); }catch{} qrScanner = null; const b=$('#qrScanBox'); if (b) b.style.display='none'; };
+  $('#scanStop').onclick = stopScan;
+  $('#scanBtn').onclick = async()=>{
+    if (!window.Html5Qrcode) return alert('Chưa tải được thư viện quét mã QR. Em kiểm tra kết nối mạng rồi tải lại trang, hoặc nhập mã phòng / dán liên kết nhé!');
+    $('#qrScanBox').style.display = 'block';
+    try{
+      qrScanner = new window.Html5Qrcode('qrReader');
+      await qrScanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 230, height: 230 } },
+        async decoded => { const code = extractRoomCode(decoded); if (!code) return; await stopScan(); enterRoomByCode(code); },
+        ()=>{});
+    }catch(e){ await stopScan(); alert('Không mở được camera để quét mã. Em kiểm tra đã cấp quyền camera cho trang chưa, hoặc nhập mã phòng / dán liên kết vào ô trên nhé!'); }
+  };
 }
 
 // ---------- Thư viện: hiện cả danh sách câu hỏi, có nút Sửa ----------
@@ -678,9 +738,11 @@ async function renderAdminPlans(box){
 function renderHost(pin){
   stopListen(); let players=[], session=null, timer=null, localBoard=false;
   app.innerHTML=`<div class="card center"><h2>📺 Phòng chờ — chiếu màn hình này cho lớp xem</h2><p>Vào EduQuiz • Nhập mã PIN:</p><div class="pinbox">${pin}</div>
+  ${shareRoomHtml(pin, 190)}
   <p id="pcount" class="big">Đang chờ học sinh…</p><div id="plist"></div>
   <label class="small" style="display:block;margin-top:12px"><input type="checkbox" id="antiCheat" checked style="width:auto"> ⚠️ Bật cảnh báo gian lận (học sinh rời màn hình câu hỏi: điểm câu đó chỉ còn 50%, có ghi vào báo cáo)</label>
   <div class="row" style="justify-content:center;margin-top:14px"><button class="btn green" id="startBtn">▶ Bắt đầu trò chơi</button></div><div id="stage"></div></div>`;
+  wireShareRoom(app);
   store.onSession(pin,s=>{ if(session&&s&&s.status!==session.status) localBoard=false; session=s; if(s) showStage(); });
   store.onPlayers(pin,ps=>{ players=ps.sort((a,b)=>(b.score||0)-(a.score||0)); const pc=$('#pcount'); if(!pc) return; pc.textContent=session?.status==='lobby'?`${ps.length} học sinh đã vào`:'Bảng điểm trực tiếp';
     $('#plist').innerHTML=ps.map(p=>`<span class="player">${p.avatar||'🙂'} ${esc(p.nickname)} • ${p.score||0}đ</span>`).join(''); if(session) showStage(); });
@@ -779,10 +841,11 @@ async function renderContests(){
   <label class="small"><b>Số câu hỏi mỗi lần thi</b> — để <b>0</b> là lấy tất cả câu trong bộ đề; nếu đặt số, mỗi lần làm bài hệ thống tự chọn ngẫu nhiên đủ số câu đó và xáo trộn thứ tự câu lẫn phương án <input id="ctNumQ" type="number" value="0" min="0" max="100" style="width:90px"></label>
   <label class="small" style="display:block"><input type="checkbox" id="ctShowBoard" style="width:auto"> 🏆 Cho học sinh xem bảng xếp hạng đầy đủ sau khi nộp bài (thứ hạng, tên, thời gian làm bài, điểm)</label>
   <button class="btn green" id="ctCreate">🏆 Tạo cuộc thi</button> <span id="ctMsg" class="small"></span>
-  <p class="small">Học sinh vào bằng <b>mã phòng thi 6 số</b> ở thẻ “Vào phòng thi” tại Trang chủ. Ngoài khung giờ trên, học sinh không vào được phòng thi.</p></div>
+  <p class="small">Học sinh vào bằng <b>mã phòng thi 6 số</b> tại Trang chủ, hoặc bấm nút <b>📱 QR / Liên kết</b> ở mỗi cuộc thi bên dưới để lấy mã QR / liên kết vào thẳng phòng thi (không cần nhập mã). Ngoài khung giờ trên, học sinh không vào được phòng thi.</p></div>
   <div class="card"><h2>Cuộc thi của tôi (${mine.length})</h2>
   ${mine.length? mine.map(c=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(c.title)}</b> ${statusOf(c)}<br><span class="small">Mã phòng thi: <b style="font-size:18px">${esc(c.code)}</b> • ${esc(c.className||'Không chọn lớp')} • ${c.questions?.length||0} câu • Tối đa ${c.maxAttempts||1} lần làm${c.numQuestions>0?` • Mỗi lần thi ${c.numQuestions} câu ngẫu nhiên`:''}${c.showLeaderboard?' • HS xem được BXH':''}<br>Từ ${fmtDT(c.startAt)} đến ${fmtDT(c.endAt)}${c.password?' • Có mật mã':''}</span></div>
-  <button class="btn" data-stats="${c.code}">📊 Thống kê</button><button class="btn red" data-delct="${c.code}">Xóa</button></div></div>`).join('') : '<p class="small">Chưa có cuộc thi nào.</p>'}</div>`;
+  <button class="btn light" data-share="${c.code}">📱 QR / Liên kết</button><button class="btn" data-stats="${c.code}">📊 Thống kê</button><button class="btn red" data-delct="${c.code}">Xóa</button></div>
+  <div data-sharebox="${c.code}" style="display:none;text-align:center">${shareRoomHtml(c.code, 150)}</div></div>`).join('') : '<p class="small">Chưa có cuộc thi nào.</p>'}</div>`;
   $('#ctCreate').onclick = async()=>{
     const quiz = quizzes.find(q=>q.id===$('#ctQuiz').value); if(!quiz) return alert('Thầy/cô chưa có bộ đề nào. Tạo bộ đề trước nhé!');
     const startAt = new Date($('#ctStart').value).getTime(), endAt = new Date($('#ctEnd').value).getTime();
@@ -792,9 +855,11 @@ async function renderContests(){
       classId: cls?.id||'', className: cls?.name||'', startAt, endAt, password: $('#ctPass').value.trim(),
       maxAttempts: Math.max(1,Math.min(10,+$('#ctAttempts').value||1)), antiCheat: $('#ctAnti').checked, numQuestions: Math.max(0,+$('#ctNumQ').value||0), showLeaderboard: $('#ctShowBoard').checked,
       ownerUid: me?.uid||'', ownerEmail: me?.email||'', createdAt: Date.now() });
-    alert('Đã tạo cuộc thi! Mã phòng thi: '+code+'\nThầy/cô gửi mã này cho học sinh để vào thi trong khung giờ đã đặt.');
+    alert('Đã tạo cuộc thi! Mã phòng thi: '+code+'\nThầy/cô gửi mã này cho học sinh, hoặc bấm nút "📱 QR / Liên kết" ở cuộc thi vừa tạo để chép liên kết / cho học sinh quét mã QR vào thẳng phòng thi trong khung giờ đã đặt.');
     renderContests();
   };
+  app.querySelectorAll('[data-share]').forEach(b=>b.onclick=()=>{ const el=app.querySelector(`[data-sharebox="${b.dataset.share}"]`); el.style.display = el.style.display==='none'?'block':'none'; });
+  wireShareRoom(app);
   app.querySelectorAll('[data-stats]').forEach(b=>b.onclick=()=>renderContestStats(b.dataset.stats));
   app.querySelectorAll('[data-delct]').forEach(b=>b.onclick=async()=>{ if(confirm('Xóa cuộc thi này và toàn bộ kết quả của học sinh?')){ await contestDelete(b.dataset.delct); renderContests(); } });
 }
