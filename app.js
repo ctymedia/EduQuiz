@@ -518,9 +518,9 @@ function renderCreateHub(){
 function renderContestHub(){
   app.innerHTML=`<div class="card"><h1>🏆 Cuộc thi</h1><p class="small">Thầy/cô chọn hình thức tổ chức:</p>
   <div class="row" style="align-items:stretch">
-  ${can('host')?`<button class="btn grow" id="ctLive" style="padding:22px;font-size:18px;background:#ffedd5;color:#7c2d12;border:2px solid #fdba74">📺<br>Trực tiếp<br><span class="small" style="font-weight:400">Chế độ tổ chức chơi trực tiếp bằng mã PIN như hiện tại — vào Thư viện, chọn bộ đề rồi bấm nút Cuộc thi</span></button>`:''}
-  ${can('create')?`<button class="btn grow" id="ctAsync" style="padding:22px;font-size:18px;background:#ccfbf1;color:#134e4a;border:2px solid #5eead4">🕒<br>Gián tiếp<br><span class="small" style="font-weight:400">Chế độ cuộc thi theo khung giờ như hiện tại — đặt giờ mở/đóng phòng, mật mã, số lần làm lại, học sinh tự vào làm bài</span></button>`:''}
-  ${can('create')?`<button class="btn grow" id="ctHw" style="padding:22px;font-size:18px;background:#dbeafe;color:#1e3a8a;border:2px solid #93c5fd">📚<br>Bài tập<br><span class="small" style="font-weight:400">Chế độ bài tập — tổng thời gian và tổng điểm do thầy/cô đặt, đúng có điểm sai 0 điểm, học sinh làm theo danh sách câu hỏi và chỉ xem được điểm của mình</span></button>`:''}
+  ${can('host')?`<button class="btn grow" id="ctLive" style="padding:22px;font-size:18px;background:#ffedd5;color:#7c2d12;border:2px solid #fdba74">📺<br>Trực tiếp<br><span class="small" style="font-weight:400">Tổ chức cuộc thi trực tiếp bằng mã PIN</span></button>`:''}
+  ${can('create')?`<button class="btn grow" id="ctAsync" style="padding:22px;font-size:18px;background:#ccfbf1;color:#134e4a;border:2px solid #5eead4">🕒<br>Gián tiếp<br><span class="small" style="font-weight:400">Mở cuộc thi trong khoảng thời gian nhất định</span></button>`:''}
+  ${can('create')?`<button class="btn grow" id="ctHw" style="padding:22px;font-size:18px;background:#dbeafe;color:#1e3a8a;border:2px solid #93c5fd">📚<br>Bài tập<br><span class="small" style="font-weight:400">Ôn luyện kiến thức, thi không tính tốc độ</span></button>`:''}
   </div>${(!can('host')&&!can('create'))?'<p class="small">Tài khoản của thầy/cô chưa được cấp quyền tổ chức cuộc thi. Vui lòng liên hệ admin.</p>':''}</div>`;
   const l=$('#ctLive'); if(l) l.onclick=()=>renderLibrary();
   const a=$('#ctAsync'); if(a) a.onclick=()=>renderContests();
