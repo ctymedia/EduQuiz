@@ -301,7 +301,7 @@ function wireShareRoom(root){
   (root||app).querySelectorAll('[data-copylink]').forEach(b=>b.onclick=()=>copyRoomLink(b.dataset.copylink, b));
 }
 async function enterRoomByCode(code){
-  const s = await store.getSession(code); if (s) return renderJoinSetup(code);
+  const s = await store.getSession(code); if (s){ if (s.status==='closed'||s.status==='finished'){ alert('🚪 Phòng thi này đã đóng. Em hỏi thầy/cô để biết thêm nhé!'); return; } return renderJoinSetup(code); }
   const ct = await contestGet(code); if (ct) return renderContestGate(code);
   alert('Không tìm thấy phòng nào với mã này. Em kiểm tra lại mã giúp thầy/cô nhé!');
   return false;
@@ -340,6 +340,7 @@ function renderJoinSetup(pin){
   <button class="btn green" style="width:100%;margin-top:14px" id="readyBtn">✔ Sẵn sàng</button></div>`;
   const getAv = wireAvatarPicker('avPick');
   $('#readyBtn').onclick = async()=>{ const nick = $('#jnick').value.trim(); if(!nick) return alert('Em nhập biệt danh trước nhé!');
+    const ss = await store.getSession(pin); if(ss && (ss.status==='closed'||ss.status==='finished')) return alert('🚪 Phòng thi này đã đóng.');
     const pid = await store.join(pin, nick, getAv());
     try{ localStorage.setItem('eq_resume_live', JSON.stringify({ pin, playerId: pid, nick, at: Date.now() })); }catch{}
     renderPlayer(pin, pid); };
@@ -771,12 +772,11 @@ async function renderAdminMembers(box){
   const users=snap.docs.map(d=>({uid:d.id,...d.data()}));
   const statusTxt={pending:'⏳ Chờ duyệt',approved:'✅ Đang hoạt động',blocked:'🚫 Đã chặn'};
   box.innerHTML=`<p class="small">${users.length} thành viên • Bấm ↕ trên đầu cột để sắp xếp • Bấm số thiết bị để xem tên thiết bị + IP.</p>
-  <div style="overflow-x:auto"><table class="sortable"><tr><th>Thành viên</th><th>Trạng thái</th><th>Gói</th><th>Chức năng được dùng</th><th>Hạn sử dụng</th><th>Thiết bị</th><th data-nosort>Thao tác</th></tr>
+  <div style="overflow-x:auto"><table class="sortable"><tr><th>Thành viên</th><th>Trạng thái</th><th>Gói</th><th>Hạn sử dụng</th><th>Thiết bị</th><th data-nosort>Thao tác</th></tr>
   ${users.map(u=>`<tr>
     <td><b>${esc(u.displayName||'(chưa có tên)')}</b><br><span class="small">${esc(u.email)}${u.role==='admin'?' • 👑 Admin':''}<br>Đăng ký: ${fmtDate(u.createdAt)}</span></td>
     <td>${statusTxt[u.status]||esc(u.status)}</td>
     <td><b>${esc((plans[u.plan||'free']?.name)||'Free')}</b></td>
-    <td>${FEATURES.map(([k,label])=>`<span class="badge" style="${!can2(u,k)?'opacity:.4;text-decoration:line-through':''}">${label}</span>`).join(' ')}</td>
     <td data-sort="${u.expiresAt||9999999999999}">${fmtDate(u.expiresAt)}${u.expiresAt&&Date.now()>u.expiresAt?' <b style="color:#e11d48">(hết hạn)</b>':''}</td>
     <td><button class="btn light" data-devices="${u.uid}">📱 Xem (<span data-devcount="${u.uid}">…</span>)</button><div data-devlist="${u.uid}"></div></td>
     <td><div class="row">
@@ -790,9 +790,11 @@ async function renderAdminMembers(box){
   users.forEach(async u=>{ const ds=await F.getDocs(F.collection(db,'users',u.uid,'devices')); const el=box.querySelector(`[data-devcount="${u.uid}"]`); if(el) el.textContent=ds.size; });
   box.querySelectorAll('[data-devices]').forEach(b=>b.onclick=async()=>{ const uid=b.dataset.devices, dv=box.querySelector(`[data-devlist="${uid}"]`);
     if(dv.innerHTML){ dv.innerHTML=''; return; } const ds=await F.getDocs(F.collection(db,'users',uid,'devices'));
-    dv.innerHTML = ds.empty?'<p class="small">Chưa có thiết bị nào đăng nhập.</p>':ds.docs.map(d=>{ const v=d.data(); const logs=(Array.isArray(v.logins)&&v.logins.length)?v.logins:[{at:v.lastLoginAt,ip:v.ip},{at:v.firstLoginAt,ip:v.ip}].filter(x=>x.at);
-      return `<div style="text-align:left;margin:6px 0"><button class="btn light" data-devhist="${d.id}" style="padding:7px 12px;font-size:14px">📱 ${esc(v.name)} — IP: ${esc(v.ip)} • Lần cuối: ${fmtDT(v.lastLoginAt)}</button><div data-devhistbox="${d.id}" style="display:none;margin:6px 0 6px 14px"><b class="small">🕘 Lịch sử đăng nhập của thiết bị này (bấm lại để đóng):</b>${logs.map(l=>`<p class="small" style="margin:2px 0">• ${fmtDT(l.at)} — IP: ${esc(l.ip||'Không rõ')}</p>`).join('')||'<p class="small">Chưa có lịch sử.</p>'}</div></div>`; }).join('');
-    dv.querySelectorAll('[data-devhist]').forEach(b=>b.onclick=()=>{ const hb=dv.querySelector(`[data-devhistbox="${b.dataset.devhist}"]`); if(hb) hb.style.display=hb.style.display==='none'?'block':'none'; }); });
+    if(ds.empty){ dv.innerHTML='<p class="small">Chưa có thiết bị nào đăng nhập.</p>'; return; }
+    dv.innerHTML = `<table><tr><th>STT</th><th>Tên thiết bị</th><th>ID thiết bị</th><th>Đăng nhập gần nhất</th></tr>${ds.docs.map((d,ix)=>{ const v=d.data(); const logs=(Array.isArray(v.logins)&&v.logins.length)?v.logins:[{at:v.lastLoginAt,ip:v.ip},{at:v.firstLoginAt,ip:v.ip}].filter(x=>x.at);
+      return `<tr data-devhist="${d.id}" style="cursor:pointer" title="Bấm để xem lịch sử đăng nhập của thiết bị này"><td>${ix+1}</td><td><b>${esc(v.name)}</b></td><td><span class="small">${esc(d.id)}</span></td><td>${fmtDT(v.lastLoginAt)}</td></tr>
+      <tr data-devhistbox="${d.id}" style="display:none"><td colspan="4"><b class="small">🕘 Chi tiết lịch sử đăng nhập của thiết bị "${esc(v.name)}":</b><table><tr><th>STT</th><th>Thời gian đăng nhập</th><th>Địa chỉ IP</th></tr>${logs.map((l,j)=>`<tr><td>${j+1}</td><td>${fmtDT(l.at)}</td><td>${esc(l.ip||'Không rõ')}</td></tr>`).join('')||'<tr><td colspan="3">Chưa có lịch sử.</td></tr>'}</table></td></tr>`; }).join('')}</table><p class="small">Bấm vào một dòng thiết bị để xem lịch sử đăng nhập chi tiết của thiết bị đó.</p>`;
+    dv.querySelectorAll('[data-devhist]').forEach(r=>r.onclick=()=>{ const hb=dv.querySelector(`[data-devhistbox="${r.dataset.devhist}"]`); if(hb) hb.style.display=hb.style.display==='none'?'':'none'; }); });
   box.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{ const uid=b.dataset.u, act=b.dataset.act, ref=F.doc(db,'users',uid), u=users.find(x=>x.uid===uid);
     if(act==='approve'){ await F.updateDoc(ref,{status:'approved', plan:u.plan||'free'}); renderAdmin('members'); }
     if(act==='block'&&confirm(`Chặn tài khoản ${u.email}?`)){ await F.updateDoc(ref,{status:'blocked'}); renderAdmin('members'); }
@@ -805,10 +807,12 @@ async function renderAdminMembers(box){
       <label class="small">Hạn sử dụng:</label><input data-e="exp" type="date" value="${u.expiresAt?new Date(u.expiresAt).toISOString().slice(0,10):''}">
       <label class="small"><input type="checkbox" data-e="noexp" ${!u.expiresAt?'checked':''} style="width:auto"> Không giới hạn hạn dùng</label><br>
       <label class="small">Vai trò:</label><select data-e="role"><option value="teacher" ${u.role!=='admin'?'selected':''}>Giáo viên</option><option value="admin" ${u.role==='admin'?'selected':''}>Admin</option></select>
+      <b class="small">Chức năng được sử dụng (tùy chỉnh riêng cho thành viên này, ngoài gói):</b><br>
+      ${FEATURES.map(([k,label])=>`<label class="small"><input type="checkbox" data-e="f-${k}" ${u.features?.[k]!==false?'checked':''} style="width:auto"> ${label}</label><br>`).join('')}
       <button class="btn green" data-save="${uid}">💾 Lưu thay đổi</button></div>`;
-      eb.querySelector('[data-save]').onclick=async()=>{
+      eb.querySelector('[data-save]').onclick=async()=>{ const features={}; FEATURES.forEach(([k])=>features[k]=eb.querySelector(`[data-e="f-${k}"]`).checked);
         const noexp=eb.querySelector('[data-e="noexp"]').checked, expVal=eb.querySelector('[data-e="exp"]').value;
-        await F.updateDoc(ref,{displayName:eb.querySelector('[data-e="name"]').value.trim(), plan:eb.querySelector('[data-e="plan"]').value, role:eb.querySelector('[data-e="role"]').value, expiresAt:noexp?null:(expVal?new Date(expVal+'T23:59:59').getTime():null)});
+        await F.updateDoc(ref,{displayName:eb.querySelector('[data-e="name"]').value.trim(), plan:eb.querySelector('[data-e="plan"]').value, role:eb.querySelector('[data-e="role"]').value, features, expiresAt:noexp?null:(expVal?new Date(expVal+'T23:59:59').getTime():null)});
         alert('Đã lưu thay đổi.'); renderAdmin('members'); }; }
   });
 }
@@ -834,7 +838,7 @@ async function renderAdminKeys(box){
 }
 async function renderAdminPlans(box){
   await loadPlans();
-  box.innerHTML=`<p class="small">Cài đặt 3 gói thành viên. Người dùng được duyệt sẽ tự dùng gói <b>Free</b>; admin gán gói khác trong tab Thành viên → Sửa. Nhập <b>0 = không giới hạn</b> ở các ô số lượng.</p>
+  box.innerHTML=`<p class="small">Cài đặt các gói thành viên. Người dùng được duyệt sẽ tự dùng gói <b>Free</b>; admin gán gói khác trong tab Thành viên → Sửa. Nhập <b>0 = không giới hạn</b> ở các ô số lượng.</p>
   ${Object.entries(plans).map(([id,p])=>`<div class="card" style="background:#fafafa"><h2>Gói ${esc(p.name)}</h2>
     <b class="small">Chức năng được dùng:</b><br>
     ${FEATURES.map(([k,label])=>`<label class="small" style="margin-right:12px"><input type="checkbox" data-plan="${id}" data-pf="${k}" ${p.features?.[k]?'checked':''} style="width:auto"> ${label}</label>`).join('')}
@@ -855,9 +859,12 @@ function renderHost(pin){
   ${shareRoomHtml(pin, 190)}
   <p id="pcount" class="big">Đang chờ học sinh…</p><div id="plist"></div>
   <label class="small" style="display:block;margin-top:12px"><input type="checkbox" id="antiCheat" checked style="width:auto"> ⚠️ Bật cảnh báo gian lận (học sinh rời màn hình câu hỏi: điểm câu đó chỉ còn 50%, có ghi vào báo cáo)</label>
-  <div class="row" style="justify-content:center;margin-top:14px"><button class="btn green" id="startBtn">▶ Bắt đầu trò chơi</button></div></div><div id="stage"></div></div>`;
+  <div class="row" style="justify-content:center;margin-top:14px"><button class="btn green" id="startBtn">▶ Bắt đầu trò chơi</button><button class="btn red" id="closeRoomBtn">🚪 Đóng phòng thi</button></div></div><div id="stage"></div></div>`;
   wireShareRoom(app);
   const applyHostBg=()=>{ const hc=$('#hostCard'); if(!hc||!session) return; const inGame=session.status!=='lobby'; const url=inGame?(session.contestBg||session.cover):session.cover; const fade=inGame?(session.bgFade??85):(session.coverFade??80); if(url){ const f=Math.min(1,Math.max(0,(+fade||0)/100)); hc.style.backgroundImage=`linear-gradient(rgba(255,255,255,${f}),rgba(255,255,255,${f})),url('${url}')`; hc.style.backgroundSize='cover'; hc.style.backgroundPosition='center'; } else hc.style.backgroundImage=''; };
+    const crb=$('#closeRoomBtn'); if(crb) crb.onclick=async()=>{ if(!confirm('Đóng phòng thi này? Buổi thi sẽ kết thúc và học sinh không vào thêm được.')) return; await store.setSession(pin,{status:'closed'}); renderLibrary(); };
+  const closeOnNav=async()=>{ try{ const s=await store.getSession(pin); if(s&&s.status!=='finished'&&s.status!=='closed') await store.setSession(pin,{status:'closed'}); }catch{} };
+  document.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click', closeOnNav, { once:true }));
   store.onSession(pin,s=>{ if(session&&s&&s.status!==session.status) localBoard=false; session=s; if(s){ applyHostBg(); showStage(); } });
   store.onPlayers(pin,ps=>{ players=ps.sort((a,b)=>(b.score||0)-(a.score||0)); const pc=$('#pcount'); if(!pc) return; pc.textContent=session?.status==='lobby'?`${ps.length} học sinh đã vào`:'Bảng điểm trực tiếp';
     $('#plist').innerHTML=ps.map(p=>`<span class="player">${p.avatar||'🙂'} ${esc(p.nickname)} • ${p.score||0}đ</span>`).join('');
@@ -897,9 +904,11 @@ function renderPlayer(pin, playerId){
     const st=$('#pstage'); if(st&&!st.querySelector('.cheatwarn')) st.insertAdjacentHTML('afterbegin','<div class="notice cheatwarn">⚠️ <b>Cảnh báo gian lận:</b> Em đã rời khỏi màn hình câu hỏi. Điểm của câu này chỉ còn <b>50%</b> và lần rời màn hình này sẽ hiện trong báo cáo của thầy/cô.</div>'); };
   document.addEventListener('visibilitychange', ()=>{ if(document.hidden) onLeave(); });
   window.addEventListener('blur', onLeave);
+  window.addEventListener('pagehide', onLeave);
   app.innerHTML=`<div class="card center" id="pstage"><h2>Đã vào phòng!</h2><p>Nhìn lên màn hình của thầy/cô và chờ câu hỏi nhé…</p></div>`;
   store.onSession(pin,async s=>{ if(!s) return; curSession=s; clearInterval(pTimer); const st=$('#pstage'); if(!st) return;
     { const inGame=s.status!=='lobby'; const url=inGame?(s.contestBg||s.cover):s.cover; const fade=inGame?(s.bgFade??85):(s.coverFade??80); if(url){ const f=Math.min(1,Math.max(0,(+fade||0)/100)); st.style.backgroundImage=`linear-gradient(rgba(255,255,255,${f}),rgba(255,255,255,${f})),url('${url}')`; st.style.backgroundSize='cover'; st.style.backgroundPosition='center'; } }
+    if(s.status==='closed'){ try{ localStorage.removeItem('eq_resume_live'); }catch{} st.innerHTML=`<h2>🚪 Phòng thi đã đóng</h2><p>Người tổ chức đã đóng phòng thi này. Cảm ơn em đã tham gia!</p><button class="btn" onclick="location.reload()">← Về trang chủ</button>`; return; }
     if(s.status==='lobby'){ st.innerHTML=`<h2>✅ Đã vào phòng chờ</h2><p>Chờ thầy/cô bấm Bắt đầu…</p>`; return; }
     if(s.status==='finished'){ try{ localStorage.removeItem('eq_resume_live'); }catch{} store.listPlayers(pin).then(ps=>{ const m=ps.find(p=>p.id===playerId); const rank=ps.sort((a,b)=>b.score-a.score).findIndex(p=>p.id===playerId)+1; st.innerHTML=`<h2>🏁 Trò chơi kết thúc!</h2><p class="big">Em xếp hạng ${rank} • ${m?.score||0} điểm</p>`+podium(ps); enableSorting(st); }); return; }
     if(s.status==='leaderboard'||s.status==='showing_answer'){ store.listPlayers(pin).then(ps=>{ const m=ps.find(p=>p.id===playerId); const a=m?.answers?.[s.currentQuestion];
@@ -947,6 +956,9 @@ async function contestList(){
   if (DEMO){ const out=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k?.startsWith('eq_contest_')) out.push(JSON.parse(localStorage.getItem(k))); } return out.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)); }
   const sn = await F.getDocs(F.collection(db,'contests')); return sn.docs.map(d=>({code:d.id,...d.data()})).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
 }
+async function contestPatch(code, patch){
+  if (DEMO){ const k='eq_contest_'+code; const c=JSON.parse(localStorage.getItem(k)||'null'); if(c){ Object.assign(c,patch); localStorage.setItem(k, JSON.stringify(c)); } return; }
+  await F.updateDoc(F.doc(db,'contests',String(code)), patch); }
 async function contestDelete(code){
   if (DEMO){ localStorage.removeItem('eq_contest_'+code); localStorage.removeItem('eq_results_'+code); return; }
   const rs = await F.getDocs(F.collection(db,'contests',code,'results'));
@@ -968,7 +980,7 @@ async function renderContests(){
   const classes = (await store.listClasses()).filter(c=>me?.role==='admin'||c.ownerUid===me?.uid);
   const mine = (await contestList()).filter(c=>me?.role==='admin'||c.ownerUid===me?.uid);
   const now = Date.now();
-  const statusOf = c => now < c.startAt ? '<b style="color:#d97706">Chưa mở</b>' : now > c.endAt ? '<b style="color:#e11d48">Đã đóng</b>' : '<b style="color:#16a34a">Đang mở</b>';
+  const statusOf = c => c.closed ? '<b style="color:#e11d48">🔒 Đã đóng</b>' : now < c.startAt ? '<b style="color:#d97706">Chưa mở</b>' : now > c.endAt ? '<b style="color:#e11d48">Đã đóng</b>' : '<b style="color:#16a34a">Đang mở</b>';
   app.innerHTML = `<div class="card"><h1>🏆 Tạo cuộc thi</h1>
   <label class="small"><b>Chọn bộ đề</b></label>
   <select id="ctQuiz">${quizzes.map(q=>`<option value="${q.id}">${esc(q.title)} (${q.questions.length} câu)</option>`).join('')||'<option value="">— Chưa có bộ đề nào —</option>'}</select>
@@ -985,7 +997,7 @@ async function renderContests(){
   <p class="small">Học sinh vào bằng <b>mã phòng thi 6 số</b> tại Trang chủ, hoặc bấm nút <b>📱 QR / Liên kết</b> ở mỗi cuộc thi bên dưới để lấy mã QR / liên kết vào thẳng phòng thi (không cần nhập mã). Ngoài khung giờ trên, học sinh không vào được phòng thi.</p></div>
   <div class="card"><h2>Cuộc thi của tôi (${mine.length})</h2>
   ${mine.length? mine.map(c=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(c.title)}</b> ${statusOf(c)}<br><span class="small">Mã phòng thi: <b style="font-size:18px">${esc(c.code)}</b> • ${esc(c.className||'Không chọn lớp')} • ${c.questions?.length||0} câu • Tối đa ${c.maxAttempts||1} lần làm${c.numQuestions>0?` • Mỗi lần thi ${c.numQuestions} câu ngẫu nhiên`:''}${c.showLeaderboard?' • HS xem được BXH':''}<br>Từ ${fmtDT(c.startAt)} đến ${fmtDT(c.endAt)}${c.password?' • Có mật mã':''}</span></div>
-  <button class="btn light" data-share="${c.code}">📱 QR / Liên kết</button><button class="btn" data-stats="${c.code}">📊 Thống kê</button><button class="btn red" data-delct="${c.code}">Xóa</button></div>
+  <button class="btn light" data-share="${c.code}">📱 QR / Liên kết</button><button class="btn" data-stats="${c.code}">📊 Thống kê</button>${c.closed?'':`<button class="btn gray" data-closect="${c.code}">🔒 Đóng</button>`}<button class="btn red" data-delct="${c.code}">Xóa</button></div>
   <div data-sharebox="${c.code}" style="display:none;text-align:center">${shareRoomHtml(c.code, 150)}</div></div>`).join('') : '<p class="small">Chưa có cuộc thi nào.</p>'}</div>`;
   $('#ctCreate').onclick = async()=>{
     const quiz = quizzes.find(q=>q.id===$('#ctQuiz').value); if(!quiz) return alert('Thầy/cô chưa có bộ đề nào. Tạo bộ đề trước nhé!');
@@ -1003,6 +1015,7 @@ async function renderContests(){
   wireShareRoom(app);
   app.querySelectorAll('[data-stats]').forEach(b=>b.onclick=()=>renderContestStats(b.dataset.stats));
   app.querySelectorAll('[data-delct]').forEach(b=>b.onclick=async()=>{ if(confirm('Xóa cuộc thi này và toàn bộ kết quả của học sinh?')){ await contestDelete(b.dataset.delct); renderContests(); } });
+  app.querySelectorAll('[data-closect]').forEach(b=>b.onclick=async()=>{ if(confirm('Đóng cuộc thi này? Học sinh sẽ không vào làm bài được nữa.')){ await contestPatch(b.dataset.closect,{closed:true}); renderContests(); } });
 }
 
 // Cổng vào phòng thi cho học sinh
@@ -1011,7 +1024,7 @@ const ctBgStyle = ct => fadeBgStyle(ct?.contestBg, ct?.bgFade);
 async function renderContestGate(code, nickname){
   const ct = await contestGet(code);
   if (!ct){ alert('Không tìm thấy phòng thi này. Em kiểm tra lại mã phòng thi nhé!'); return; }
-  const now = Date.now(), open = now>=ct.startAt && now<=ct.endAt;
+  const now = Date.now(), open = !ct.closed && now>=ct.startAt && now<=ct.endAt;
   app.innerHTML = `<div class="card join"${ctBgStyle(ct)}><h1>🏆 ${esc(ct.title)}</h1>
   <p class="small">${ct.className?`Lớp: <b>${esc(ct.className)}</b> • `:''}${ct.numQuestions>0?`Thi ${ct.numQuestions} câu (chọn ngẫu nhiên từ ${ct.questions.length} câu của bộ đề)`:ct.questions.length+' câu hỏi'} • Mỗi em được làm tối đa <b>${ct.maxAttempts||1} lần</b><br>Khung giờ thi: từ <b>${fmtDT(ct.startAt)}</b> đến <b>${fmtDT(ct.endAt)}</b></p>
   <div id="ctResume"></div>
@@ -1020,7 +1033,7 @@ async function renderContestGate(code, nickname){
   ${ct.password?'<input id="gPass" type="password" placeholder="Mật mã phòng thi">':''}
   <button class="btn green" style="width:100%" id="gStart">✔ Sẵn sàng — Bắt đầu làm bài</button>
   <p class="small">Trả lời xong mỗi câu, hệ thống tự chuyển sang câu tiếp theo. ${ct.antiCheat?'Lưu ý: rời khỏi màn hình khi đang làm bài sẽ bị trừ 50% điểm câu đó và ghi vào thống kê.':''}</p>`
-  : `<div class="notice">${now<ct.startAt?'⏰ Chưa đến giờ thi. Em quay lại trong khung giờ ở trên nhé!':'⛔ Đã hết thời gian thi, phòng thi đã đóng.'}</div>
+  : `<div class="notice">${ct.closed?'🔒 Cuộc thi đã bị đóng bởi người tổ chức. Hẹn em ở cuộc thi khác nhé!':now<ct.startAt?'⏰ Chưa đến giờ thi. Em quay lại trong khung giờ ở trên nhé!':'⛔ Đã hết thời gian thi, phòng thi đã đóng.'}</div>
   <button class="btn" style="width:100%" onclick="location.reload()">← Về trang chủ</button>`}</div>`;
   if (!open) return;
   const getGAv = wireAvatarPicker('gAvPick');
@@ -1066,8 +1079,8 @@ function renderContestPlay(ct, nickname, attemptsBefore, avatar, saved){
   function saveProg(){ if (finished) return; try{ localStorage.setItem('eq_resume_contest', JSON.stringify({ code: ct.code, nickname, avatar: avatar||'🙂', attemptsBefore: attemptsBefore||0, qs, i, score, correctCount, cheatCount, answers, startedAt, savedAt: Date.now() })); }catch{} }
   const onVis = ()=>{ if (document.hidden) markCheat(); };
   const onBlur = ()=>markCheat();
-  document.addEventListener('visibilitychange', onVis); window.addEventListener('blur', onBlur);
-  function cleanup(){ clearInterval(timerInt); document.removeEventListener('visibilitychange', onVis); window.removeEventListener('blur', onBlur); }
+  document.addEventListener('visibilitychange', onVis); window.addEventListener('blur', onBlur); window.addEventListener('pagehide', onBlur);
+  function cleanup(){ clearInterval(timerInt); document.removeEventListener('visibilitychange', onVis); window.removeEventListener('blur', onBlur); window.removeEventListener('pagehide', onBlur); }
   function markCheat(){
     if (finished || locked || ct.antiCheat===false || cheated) return;
     cheated = true; cheatCount++;
@@ -1140,21 +1153,37 @@ async function renderContestStats(code){
 }
 
 async function renderReports(){
-  const myCts = (await contestList()).filter(ct=>me?.role==='admin'||!ct.ownerUid||ct.ownerUid===me?.uid).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
-  const sessions=(await listSessionsData()).filter(x=>me?.role==='admin'||!x.hostUid||x.hostUid===me?.uid).slice(0,10);
+  const now = Date.now();
+  const open = (await contestList()).filter(ct=>(me?.role==='admin'||!ct.ownerUid||ct.ownerUid===me?.uid) && !ct.closed && now>=ct.startAt && now<=ct.endAt).sort((a,b)=>(a.endAt||0)-(b.endAt||0));
   app.innerHTML=`<div class="card"><h1>📊 Báo cáo</h1>
-  <h2>🏆 Các cuộc thi thầy/cô đã tổ chức</h2>
-  <p class="small">Bấm vào một cuộc thi để xem bảng xếp hạng chi tiết của cuộc thi đó.</p>
-  ${myCts.length? myCts.map(ct=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(ct.title)}</b><br><span class="small">Mã phòng thi ${esc(ct.code)} • Mở: ${fmtDT(ct.startAt)} → Đóng: ${fmtDT(ct.endAt)} • Đã có <span data-repcount="${esc(ct.code)}">…</span> lượt làm bài</span></div><button class="btn" data-repstats="${esc(ct.code)}">📊 Xem bảng xếp hạng</button></div></div>`).join('') : '<p class="small">Chưa có cuộc thi nào. Thầy/cô vào mục 🏆 Cuộc thi → Gián tiếp để tạo cuộc thi nhé.</p>'}
-  <h2>▶ Các buổi chơi trực tiếp gần đây</h2>
-  ${sessions.length? sessions.map(x=>`<div class="card" style="background:#fafafa"><b>${esc(x.title||'Buổi chơi')}</b> <span class="small">• Mã PIN ${esc(x.pin)} • ${x.status==='finished'?'Đã kết thúc':'Đang diễn ra'}</span>
-    <table class="sortable"><tr><th>Học sinh</th><th>Điểm</th><th>Số câu đúng</th><th>⚠️ Số lần rời màn hình</th></tr>
-    ${(x.players||[]).slice().sort((a,b)=>(b.score||0)-(a.score||0)).map(pl=>`<tr><td>${pl.avatar||'🙂'} ${esc(pl.nickname)}</td><td data-sort="${pl.score||0}">${pl.score||0}</td><td data-sort="${Object.values(pl.answers||{}).filter(a=>a.correct).length}">${Object.values(pl.answers||{}).filter(a=>a.correct).length}</td><td data-sort="${pl.cheatCount||0}">${pl.cheatCount||0}</td></tr>`).join('')||'<tr><td colspan="4">Chưa có học sinh nào.</td></tr>'}
-    </table></div>`).join('') : '<p class="small">Chưa có buổi chơi trực tiếp nào.</p>'}
+  <h2>🏆 Các cuộc thi đang mở (${open.length})</h2>
+  <p class="small">Các cuộc thi đang trong khung giờ mở. Thầy/cô có thể xem bảng xếp hạng, sửa thông tin hoặc đóng phòng thi ngay tại đây. (Cuộc thi đã đóng hoặc đã hết giờ: xem thống kê tại mục 🏆 Cuộc thi → 📊 Thống kê.)</p>
+  ${open.length? open.map(ct=>`<div class="card" style="background:#fafafa"><div class="row"><div class="grow"><b>${esc(ct.title)}</b> <b style="color:#16a34a">● Đang mở</b><br><span class="small">Mã phòng thi ${esc(ct.code)} • Đóng lúc: ${fmtDT(ct.endAt)} • Đã có <span data-repcount="${esc(ct.code)}">…</span> lượt làm bài</span></div>
+  <button class="btn" data-repview="${esc(ct.code)}">👁️ Xem</button><button class="btn light" data-repedit="${esc(ct.code)}">✏️ Sửa</button><button class="btn red" data-repclose="${esc(ct.code)}">🔒 Đóng</button></div></div>`).join('') : '<p class="small">Hiện không có cuộc thi nào đang mở. Vào mục 🏆 Cuộc thi → Gián tiếp để tạo và mở cuộc thi mới nhé.</p>'}
   </div>`;
-  enableSorting(app);
-  app.querySelectorAll('[data-repstats]').forEach(b=>b.onclick=()=>renderContestStats(b.dataset.repstats));
-  myCts.forEach(async ct=>{ const el=app.querySelector(`[data-repcount="${ct.code}"]`); if(el){ const rs=await contestResults(ct.code); el.textContent=rs.length; } });
+  app.querySelectorAll('[data-repview]').forEach(b=>b.onclick=()=>renderContestStats(b.dataset.repview));
+  app.querySelectorAll('[data-repedit]').forEach(b=>b.onclick=()=>renderContestEdit(b.dataset.repedit));
+  app.querySelectorAll('[data-repclose]').forEach(b=>b.onclick=async()=>{ if(!confirm('Đóng cuộc thi này? Học sinh sẽ không vào làm bài được nữa.')) return; await contestPatch(b.dataset.repclose,{closed:true}); renderReports(); });
+  open.forEach(async ct=>{ const el=app.querySelector(`[data-repcount="${ct.code}"]`); if(el){ const rs=await contestResults(ct.code); el.textContent=rs.length; } });
+}
+async function renderContestEdit(code){
+  const ct = await contestGet(code); if(!ct){ alert('Không tìm thấy cuộc thi.'); return; }
+  const toLocal = ts => new Date(ts - new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);
+  app.innerHTML=`<div class="card"><h1>✏️ Sửa cuộc thi</h1>
+  <p><b>${esc(ct.title)}</b> • Mã phòng thi <b>${esc(ct.code)}</b></p>
+  <label class="small">Giờ bắt đầu <input id="ceStart" type="datetime-local" value="${toLocal(ct.startAt)}"></label>
+  <label class="small">Giờ kết thúc <input id="ceEnd" type="datetime-local" value="${toLocal(ct.endAt)}"></label>
+  <label class="small">Mật mã phòng thi (để trống nếu không dùng) <input id="cePass" value="${esc(ct.password||'')}"></label>
+  <div class="row"><label class="small">Số lần làm lại tối đa <input id="ceAttempts" type="number" value="${ct.maxAttempts||1}" min="1" max="10" style="width:90px"></label>
+  <label class="small">Số câu mỗi lần thi (0 = tất cả) <input id="ceNumQ" type="number" value="${ct.numQuestions||0}" min="0" max="100" style="width:90px"></label></div>
+  <label class="small" style="display:block"><input type="checkbox" id="ceAnti" ${ct.antiCheat?'checked':''} style="width:auto"> ⚠️ Bật chống gian lận (chuyển tab, thu nhỏ cửa sổ, rời màn hình khi đang làm: điểm câu đó còn 50%)</label>
+  <label class="small" style="display:block"><input type="checkbox" id="ceShow" ${ct.showLeaderboard?'checked':''} style="width:auto"> 🏆 Cho học sinh xem bảng xếp hạng đầy đủ sau khi nộp bài</label>
+  <div class="row"><button class="btn green" id="ceSave">💾 Lưu thay đổi</button><button class="btn light" id="ceBack">← Quay lại Báo cáo</button></div></div>`;
+  $('#ceBack').onclick=()=>renderReports();
+  $('#ceSave').onclick=async()=>{ const startAt=new Date($('#ceStart').value).getTime(), endAt=new Date($('#ceEnd').value).getTime();
+    if(!startAt||!endAt||endAt<=startAt) return alert('Khung giờ thi chưa hợp lệ: giờ kết thúc phải sau giờ bắt đầu.');
+    await contestPatch(code,{ startAt, endAt, password: $('#cePass').value.trim(), maxAttempts: Math.max(1,Math.min(10,+$('#ceAttempts').value||1)), numQuestions: Math.max(0,+$('#ceNumQ').value||0), antiCheat: $('#ceAnti').checked, showLeaderboard: $('#ceShow').checked });
+    alert('Đã lưu thay đổi cuộc thi!'); renderReports(); };
 }
 const leaderboard=(ps,m)=>`<h2>🏆 Bảng xếp hạng</h2><table class="sortable"><tr><th>Hạng</th><th>Người chơi</th><th>Điểm</th></tr>${ps.slice(0,10).map((p,i)=>`<tr ${m&&p.id===m?'style="background:#fff3cd;font-weight:800"':''}><td data-sort="${i+1}">${i+1}</td><td>${p.avatar||'🙂'} ${esc(p.nickname)} ${p.streak>=3?'🔥':''}</td><td data-sort="${p.score||0}">${p.score||0} điểm</td></tr>`).join('')}</table>`;
 const podium=ps=>{ const t=[ps[1],ps[0],ps[2]].filter(Boolean); return `<h2>👑 Bục vinh quang</h2><div class="podium">${t.map(p=>`<div class="pod"><div style="font-size:28px">${p.avatar||'🙂'}</div><div>${esc(p.nickname)}</div><div class="bar">${p.score||0}đ</div></div>`).join('')}</div>`+leaderboard(ps); };
