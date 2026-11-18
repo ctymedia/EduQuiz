@@ -55,3 +55,5 @@ button{font-family:inherit}input,textarea,select{font-family:inherit}
 .uname-custom{font-weight:800;background-image:linear-gradient(90deg,#3b82f6,#8b5cf6,#ec4899);-webkit-background-clip:text;background-clip:text;color:transparent}
 .uname-ultra{font-weight:800;background-image:linear-gradient(110deg,transparent 42%,rgba(255,255,255,.9) 50%,transparent 58%),linear-gradient(90deg,#3b82f6,#22c55e,#8b5cf6,#ec4899,#f97316,#3b82f6);background-size:220% 100%,220% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:rainbowShine 5s linear infinite}
 .uavatar{border-radius:50%;object-fit:cover}
+
+.stickybar{position:sticky;bottom:10px;z-index:50;background:#fffffff2;border:2px solid #e9d5ff;border-radius:14px;padding:10px;box-shadow:0 -4px 24px #7c3aed26;margin-top:14px}
